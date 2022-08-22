@@ -1,0 +1,23 @@
+[tool.poetry]
+authors = ["Hju Kneyck Flores <hjucode@gmail.com>"]
+description = ""
+name = "app"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+blacksheep = "^1.2.7"
+orjson = "^3.7.12"
+pydantic = "^1.9.2"
+python = "^3.10"
+uvicorn = "^0.18.2"
+
+[tool.poetry.dev-dependencies]
+black = "^22.6.0"
+flake8 = "^5.0.4"
+isort = "^5.10.1"
+pylint = "^2.14.5"
+pytest = "^5.2"
+
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=1.0.0"]
