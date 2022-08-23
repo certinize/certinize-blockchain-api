@@ -9,7 +9,9 @@ blacksheep = "^1.2.7"
 orjson = "^3.7.12"
 pydantic = "^1.9.2"
 python = "^3.10"
+solana = "^0.25.1"
 uvicorn = "^0.18.2"
+base58 = "^2.1.1"
 
 [tool.poetry.dev-dependencies]
 black = "^22.6.0"

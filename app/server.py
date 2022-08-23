@@ -1,3 +1,9 @@
+"""
+app.server
+~~~~~~~~~~
+
+This module contains the server startup logic.
+"""
 import typing
 
 import blacksheep

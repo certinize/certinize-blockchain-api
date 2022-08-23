@@ -29,3 +29,7 @@ class IssuanceRequest(pydantic.BaseModel):
                 raise ValueError("Missing user_id in recipient_meta.")
             if "wallet_address" not in recipient:
                 raise ValueError("Missing wallet_address in recipient_meta.")
+
+
+class NonFungibleTokenMetadata(pydantic.BaseModel):
+    ...
