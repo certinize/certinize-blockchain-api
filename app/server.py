@@ -4,11 +4,17 @@ app.server
 
 This module contains the server startup logic.
 """
+import asyncio
+import platform
 import typing
 
 import blacksheep
+import uvloop
 
 from app import dependencies, exceptions
+
+if platform.system() == "Linux":
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 app = blacksheep.Application()
 app.services.add_exact_scoped(dependencies.Validator)  # type: ignore
@@ -21,7 +27,7 @@ post = app.router.post
 
 
 @get("/")
-def index() -> dict[str, str]:
+async def index() -> dict[str, str]:
     return {
         "message": "Hello World!",
         "documentation": "https://github.com/certinize/certinize-blockchain-api",
