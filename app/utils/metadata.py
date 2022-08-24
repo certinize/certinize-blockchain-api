@@ -20,7 +20,7 @@ from solana.rpc import api
 # https://solerscan.com/programs
 METADATA_PROGRAM_ID = publickey.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
 SYSTEM_PROGRAM_ID = publickey.PublicKey("1" * 32)
-SYSVAR_RENT_PUBKEY = publickey.PublicKey("SysvarRent" + "1" * 32)
+SYSVAR_RENT_PUBKEY = publickey.PublicKey("SysvarRent111111111111111111111111111111111")
 TOKEN_PROGRAM_ID = publickey.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = publickey.PublicKey(
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"

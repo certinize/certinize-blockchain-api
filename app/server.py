@@ -29,7 +29,7 @@ post = app.router.post
 @get("/")
 async def index() -> dict[str, str]:
     return {
-        "message": "Hello World!",
+        "message": "Hello, World!",
         "documentation": "https://github.com/certinize/certinize-blockchain-api",
     }
 

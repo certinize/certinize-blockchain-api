@@ -6,7 +6,7 @@ This module contains the services for the application.
 """
 import asyncio
 import base64
-
+import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 from solana import keypair, publickey, system_program, transaction
 from solana.rpc import api, types
 from spl.token import instructions
@@ -15,8 +15,8 @@ from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 from app.utils import metadata
 
 
-class ExecutionClient:
-    """Solana client that abstracts away common transaction execution processes."""
+class ExecutionInterface:
+    """Solana client that abstracts away common execution processes."""
 
     async def remove_duplicate(self, signers: list[keypair.Keypair]):
         seen: set[keypair.Keypair] = set()
@@ -76,7 +76,7 @@ class ExecutionClient:
         max_timeout: int = 60,
         target: int = 20,
         finalized: bool = True,
-    ):
+    ) -> types.RPCResponse | None:
         client = api.Client(api_endpoint)
         signers = await self.remove_duplicate(signers)
 
@@ -93,11 +93,13 @@ class ExecutionClient:
                     )
 
                 return result
-            except Exception as err:
+            except Exception as err:  # pylint: disable=W0703
                 raise Exception(f"Failed attempt {attempt}: {err}") from err
 
 
-class TransactionClient:
+class TransactionInterface:
+    """Client implementation that abstracts away common transaction processes."""
+
     async def deploy(
         self,
         api_endpoint: str,
@@ -110,6 +112,7 @@ class TransactionClient:
         mint_account = keypair.Keypair()
         txn = transaction.Transaction()
         token_account = metadata.TOKEN_PROGRAM_ID
+
         min_rent_bal = await loop.run_in_executor(
             None,
             api.Client(api_endpoint).get_minimum_balance_for_rent_exemption,
@@ -117,27 +120,28 @@ class TransactionClient:
         )
 
         # Generate Mint
-        create_mint_account_instruc = system_program.create_account(
-            system_program.CreateAccountParams(
-                from_pubkey=source_account.public_key,
-                new_account_pubkey=mint_account.public_key,
-                lamports=min_rent_bal.get("result", {}),
-                space=MINT_LAYOUT.sizeof(),
-                program_id=token_account,
+        txn = txn.add(
+            system_program.create_account(
+                system_program.CreateAccountParams(
+                    from_pubkey=source_account.public_key,
+                    new_account_pubkey=mint_account.public_key,
+                    lamports=min_rent_bal.get("result", {}),
+                    space=MINT_LAYOUT.sizeof(),
+                    program_id=token_account,
+                )
             )
         )
-        txn = txn.add(create_mint_account_instruc)
-
-        initialize_mint_instruc = instructions.initialize_mint(
-            instructions.InitializeMintParams(
-                decimals=0,
-                program_id=token_account,
-                mint=mint_account.public_key,
-                mint_authority=source_account.public_key,
-                freeze_authority=source_account.public_key,
+        txn = txn.add(
+            instructions.initialize_mint(
+                instructions.InitializeMintParams(
+                    decimals=0,
+                    program_id=token_account,
+                    mint=mint_account.public_key,
+                    mint_authority=source_account.public_key,
+                    freeze_authority=source_account.public_key,
+                )
             )
         )
-        txn = txn.add(initialize_mint_instruc)
 
         create_metadata_ix = await metadata.create_metadata_instruction(
             data=await metadata.create_metadata_instruction_data(
@@ -177,13 +181,13 @@ class TransactionClient:
             txn = txn.add(
                 await metadata.create_associated_token_account_instruction(
                     associated_token_account=associated_token_account,
-                    payer=source_account.public_key,  # signer
+                    payer=source_account.public_key,
                     wallet_address=user_account,
                     token_mint_address=mint_account,
                 )
             )
 
-        # Mint NFT to the newly create associated token account
+        # Mint the NFT to the associated token account.
         txn = txn.add(
             instructions.mint_to(
                 instructions.MintToParams(
@@ -262,24 +266,85 @@ class TransactionClient:
         )
 
 
-class BlockchainInteface:
-    def __init__(self) -> None:
-        pass
+class TokenFlow:
+    """Implementation of a custom minting flow."""
+
+    max_retries = 3
+    max_timeout = 60
+
+    def __init__(
+        self,
+        cfg: dict[str, str],
+        max_retries: int | None = None,
+        max_timeout: int | None = None,
+        supply: int | None = None,
+    ) -> None:
+        self.max_retries = max_retries or self.max_retries
+        self.max_timeout = max_timeout or self.max_timeout
+        self.supply = supply or 1
+        self.public_key = publickey.PublicKey(cfg["public_key"])
+        # self.private_key = list(base58.b58decode(cfg["private_key"]))[:32]
+        self.private_key = solders_keypair.Keypair().from_base58_string(
+            cfg["private_key"]
+        )
+        self.keypair = keypair.Keypair(self.private_key)
+        self.txn_intf = TransactionInterface()
+        self.exe_intf = ExecutionInterface()
+
+    def set_test_params(
+        self,
+        skip_confirmation: bool | None = None,
+        target: int | None = None,
+        finalized: bool | None = None,
+    ):
+        self.skip_confirmation = skip_confirmation or True
+        self.target = target or 20
+        self.finalized = finalized or False
 
     async def deploy(
-        self,
-        api_endpoint: str,
-        name: str,
-        symbol: str,
-        fee: int,
-    ):
-        ...
+        self, api_endpoint: str, name: str, symbol: str, fee: int
+    ) -> dict[str, types.RPCResponse | str | None]:
+        tx, signers, contract = await self.txn_intf.deploy(
+            api_endpoint, self.keypair, name, symbol, fee
+        )
+        resp = await self.exe_intf.execute(
+            api_endpoint,
+            tx,
+            signers,
+            max_retries=self.max_retries,
+            skip_confirmation=self.skip_confirmation,
+            max_timeout=self.max_timeout,
+            target=self.target,
+            finalized=self.finalized,
+        )
+
+        return {"response": resp, "contract": contract}
 
     async def mint(
         self,
         api_endpoint: str,
         contract_key: str,
         destination_key: str,
-        metadata_url: str,
+        link: str,
+        supply: int,
     ):
-        ...
+        tx, signers = await self.txn_intf.mint(
+            api_endpoint,
+            self.keypair,
+            contract_key,
+            destination_key,
+            link,
+            supply=supply,
+        )
+        resp = await self.exe_intf.execute(
+            api_endpoint,
+            tx,
+            signers,
+            max_retries=self.max_retries,
+            skip_confirmation=self.skip_confirmation,
+            max_timeout=self.max_timeout,
+            target=self.target,
+            finalized=self.finalized,
+        )
+
+        return {"response": resp}
