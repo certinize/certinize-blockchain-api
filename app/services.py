@@ -1,3 +1,4 @@
+# pylint: disable=R0913
 """
 app.services
 ~~~~~~~~~~~~
@@ -6,6 +7,7 @@ This module contains the services for the application.
 """
 import asyncio
 import base64
+
 import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 from solana import keypair, publickey, system_program, transaction
 from solana.rpc import api, types
@@ -271,17 +273,12 @@ class TokenFlow:
 
     max_retries = 3
     max_timeout = 60
+    supply = 1
+    skip_confirmation = True
+    target = 20
+    finalized = False
 
-    def __init__(
-        self,
-        cfg: dict[str, str],
-        max_retries: int | None = None,
-        max_timeout: int | None = None,
-        supply: int | None = None,
-    ) -> None:
-        self.max_retries = max_retries or self.max_retries
-        self.max_timeout = max_timeout or self.max_timeout
-        self.supply = supply or 1
+    def __init__(self, cfg: dict[str, str]) -> None:
         self.public_key = publickey.PublicKey(cfg["public_key"])
         # self.private_key = list(base58.b58decode(cfg["private_key"]))[:32]
         self.private_key = solders_keypair.Keypair().from_base58_string(
@@ -291,25 +288,15 @@ class TokenFlow:
         self.txn_intf = TransactionInterface()
         self.exe_intf = ExecutionInterface()
 
-    def set_test_params(
-        self,
-        skip_confirmation: bool | None = None,
-        target: int | None = None,
-        finalized: bool | None = None,
-    ):
-        self.skip_confirmation = skip_confirmation or True
-        self.target = target or 20
-        self.finalized = finalized or False
-
     async def deploy(
         self, api_endpoint: str, name: str, symbol: str, fee: int
     ) -> dict[str, types.RPCResponse | str | None]:
-        tx, signers, contract = await self.txn_intf.deploy(
+        txn, signers, contract = await self.txn_intf.deploy(
             api_endpoint, self.keypair, name, symbol, fee
         )
         resp = await self.exe_intf.execute(
             api_endpoint,
-            tx,
+            txn,
             signers,
             max_retries=self.max_retries,
             skip_confirmation=self.skip_confirmation,
@@ -328,7 +315,7 @@ class TokenFlow:
         link: str,
         supply: int,
     ):
-        tx, signers = await self.txn_intf.mint(
+        txn, signers = await self.txn_intf.mint(
             api_endpoint,
             self.keypair,
             contract_key,
@@ -338,7 +325,7 @@ class TokenFlow:
         )
         resp = await self.exe_intf.execute(
             api_endpoint,
-            tx,
+            txn,
             signers,
             max_retries=self.max_retries,
             skip_confirmation=self.skip_confirmation,

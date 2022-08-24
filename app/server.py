@@ -11,16 +11,15 @@ import typing
 import blacksheep
 import uvloop
 
-from app import dependencies, exceptions
+from app import dependencies, errors, middlewares
 
 if platform.system() == "Linux":
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 app = blacksheep.Application()
 app.services.add_exact_scoped(dependencies.Validator)  # type: ignore
-app.exceptions_handlers[  # type: ignore
-    exceptions.BadRequest
-] = exceptions.bad_request_exception_handler
+app.exceptions_handlers[errors.BadRequest] = errors.error_400_handler  # type: ignore
+app.middlewares.append(middlewares.MediaTypeValidator())
 
 get = app.router.get
 post = app.router.post
@@ -38,15 +37,8 @@ async def index() -> dict[str, str]:
 async def issue_certificate(
     request: blacksheep.Request, test: dependencies.Validator
 ) -> dict[str, typing.Any]:
-    if request.content_type() != b"application/json":
-        raise exceptions.BadRequest("something went wrong")
 
-    result = await test.validate_issuance_request(request)
+    request = await test.validate_issuance_request(request)
+    request_body = await request.json()
 
-    if "err" in result:
-        return {
-            "details": result["details"],
-            "code": result["code"],
-        }
-
-    return {}
+    return request_body
