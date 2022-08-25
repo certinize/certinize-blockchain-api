@@ -12,6 +12,7 @@ import blacksheep
 import uvloop
 
 from app import dependencies, errors, middlewares
+from app import settings as settings
 
 if platform.system() == "Linux":
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
