@@ -12,12 +12,12 @@ class BadRequest(Exception):
     def __init__(
         self,
         message: str | None = None,
-        details: dict[str, typing.Any] | None = None,
+        details: typing.Any | None = None,
         status: int | None = None,
     ):
         super().__init__(message)
         self.status = status or 400
-        self.details = details or {"details": ""}
+        self.details = dict(details=details) or {"details": ""}
 
 
 class UnsupportedMediaType(exceptions.HTTPException):  # pylint: disable=R0903
@@ -31,7 +31,7 @@ async def error_400_handler(
     assert isinstance(exc, BadRequest)
 
     content = blacksheep.Content(
-        data=orjson.dumps(exc.details | {"status": exc.status}),
+        data=orjson.dumps(exc.details | {"code": exc.status}),
         content_type=b"application/json",
     )
 

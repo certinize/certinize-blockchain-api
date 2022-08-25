@@ -10,17 +10,14 @@ import platform
 import blacksheep
 import uvloop
 
-from app import bindings, dependencies, errors, middlewares, models
-from app import settings as settings
+from app import bindings, errors, middlewares, models, settings
+
+_settings = settings
 
 if platform.system() == "Linux":
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 app = blacksheep.Application()
-
-# Register services
-app.services.add_exact_scoped(dependencies.Validator)  # type: ignore
-
 
 # Exception handlers
 app.exceptions_handlers[errors.BadRequest] = errors.error_400_handler  # type: ignore

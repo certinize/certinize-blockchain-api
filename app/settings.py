@@ -1,3 +1,4 @@
+# pylint: disable=E1101,I1101
 import typing
 
 import orjson
