@@ -7,7 +7,8 @@ This module contains the services for the application.
 """
 import asyncio
 import base64
-
+import aiohttp
+import orjson
 import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 from solana import keypair, publickey, system_program, transaction
 from solana.rpc import api, types
@@ -15,6 +16,9 @@ from spl.token import instructions
 from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 
 from app.utils import metadata
+
+STORAGES = "/storages"
+SOLANA_API_ENDPOINT = "https://api.devnet.solana.com"
 
 
 class ExecutionInterface:
@@ -80,12 +84,12 @@ class ExecutionInterface:
         finalized: bool = True,
     ) -> types.RPCResponse | None:
         client = api.Client(api_endpoint)
-        signers = await self.remove_duplicate(signers)
+        # signers = await self.remove_duplicate(signers)
 
         for attempt in range(max_retries):
             try:
                 result = client.send_transaction(
-                    txn, *signers, opts=types.TxOpts(skip_preflight=True)
+                    txn, *signers, opts=types.TxOpts(skip_preflight=False)
                 )
                 signatures = [str(signature) for signature in txn.signatures]
 
@@ -280,7 +284,6 @@ class TokenFlow:
 
     def __init__(self, cfg: dict[str, str]) -> None:
         self.public_key = publickey.PublicKey(cfg["public_key"])
-        # self.private_key = list(base58.b58decode(cfg["private_key"]))[:32]
         self.private_key = solders_keypair.Keypair().from_base58_string(
             cfg["private_key"]
         )
@@ -289,8 +292,27 @@ class TokenFlow:
         self.exe_intf = ExecutionInterface()
 
     async def deploy(
-        self, api_endpoint: str, name: str, symbol: str, fee: int
+        self, api_endpoint: str, name: str, symbol: str, fee: int = 0
     ) -> dict[str, types.RPCResponse | str | None]:
+        """Create a new NFT token by:
+
+        1. Creating a new account with a randomly generated address (invokes
+        CreateAccount from the System Program).
+
+        2. Invoking InitializeMint on the new account.
+
+        3. Initializing the metadata for this account by invoking the CreateMetatdata
+        instruction from the Metaplex protocol.
+
+        Args:
+            api_endpoint (str): The RPC endpoint to connect the network.
+            name (str): Name of the NFT Contract (32 bytes max).
+            symbol (str): Symbol of the NFT Contract (10 bytes max).
+            fee (int): Seller basis fee (value in 10000 ).
+
+        Returns:
+            dict[str, types.RPCResponse | str | None]: Deploy result.
+        """
         txn, signers, contract = await self.txn_intf.deploy(
             api_endpoint, self.keypair, name, symbol, fee
         )
@@ -313,7 +335,7 @@ class TokenFlow:
         contract_key: str,
         destination_key: str,
         link: str,
-        supply: int,
+        supply: int = 1,
     ):
         txn, signers = await self.txn_intf.mint(
             api_endpoint,
@@ -335,3 +357,56 @@ class TokenFlow:
         )
 
         return {"response": resp}
+
+
+class PermanentStorage:
+
+    endpoint_url: str
+    headers: dict[str, str]
+    session: aiohttp.ClientSession
+
+    def __init__(
+        self,
+        endpoint_url: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.endpoint_url = endpoint_url
+        self.headers = headers or {"X-API-Key": ""}
+        self.session = aiohttp.ClientSession(
+            headers=self.headers,
+            base_url=self.endpoint_url,
+            json_serialize=lambda json_: orjson.dumps(  # pylint: disable=E1101
+                json_
+            ).decode(),
+        )
+
+    async def upload_permanent_object(self, object: dict[str, tuple[str, bytes]]):
+        """Permanently store objects to a decentralized cloud storage.
+
+        Args:
+            object (dict[str, tuple[str, bytes]]): Dict containing file data. Example
+                {"filename.jpeg": ("image/jpeg", b'file data')}
+
+        Raises:
+            ConnectionError: If the server failed to receive a valid response from the
+                ecert processor.
+
+        Returns:
+            dict[str, str]: Details about the upload.
+        """
+        form_data = aiohttp.FormData()
+
+        for filename, file_object in object.items():
+            form_data.add_field(
+                name="file",
+                value=file_object[1],
+                content_type=file_object[0],
+                filename=filename,
+            )
+
+        try:
+            response = await self.session.post(url=STORAGES, data=form_data)
+        except aiohttp.ClientConnectorError as err:
+            raise ConnectionError(str(err)) from err
+
+        return await response.json()

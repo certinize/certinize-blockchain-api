@@ -113,12 +113,25 @@ async def get_metadata(
 ) -> dict[str, typing.Any]:
     loop = asyncio.get_running_loop()
     metadata_account = await get_metadata_account(mint_key)
-
     account_info = await loop.run_in_executor(
         None, client.get_account_info, metadata_account
     )
     result = account_info.get("result")
     assert result is not None
+    value = result["value"]
+
+    while value is None:
+        await asyncio.sleep(1)
+        account_info = await loop.run_in_executor(
+            None, client.get_account_info, metadata_account
+        )
+        result = account_info.get("result")
+        assert result is not None
+        value = result["value"]
+        print(value)
+
+    print(value)
+
     data = base64.b64decode(result["value"]["data"][0])
     metadata = unpack_metadata_account(data)
     return metadata
