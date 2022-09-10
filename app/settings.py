@@ -22,9 +22,13 @@ class AppSettings(pydantic.BaseSettings):
         url="https://", scheme="https"
     )
     certinize_api_key: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+    gmail_address: pydantic.EmailStr = pydantic.EmailStr("example@email.com")
+    gmail_password: str = "password"
+    gmail_smtp_server: str = "smtp.gmail.com"
 
     class Config(pydantic.BaseSettings.Config):
         env_file = ".env"
+        validate_all = True
 
 
 app_settings = AppSettings()

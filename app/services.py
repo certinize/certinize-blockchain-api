@@ -3,10 +3,13 @@
 app.services
 ~~~~~~~~~~~~
 
-This module contains the services for the application.
+This module contains services for the application.
 """
 import asyncio
 import base64
+import smtplib
+from email.mime import multipart, text
+
 import aiohttp
 import orjson
 import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
@@ -18,6 +21,7 @@ from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 from app.utils import metadata
 
 STORAGES = "/storages"
+ISSUANCES = "/issuances"
 SOLANA_API_ENDPOINT = "https://api.devnet.solana.com"
 
 
@@ -100,7 +104,7 @@ class ExecutionInterface:
 
                 return result
             except Exception as err:  # pylint: disable=W0703
-                raise Exception(f"Failed attempt {attempt}: {err}") from err
+                raise RuntimeError(f"Failed attempt {attempt}: {err}") from err
 
 
 class TransactionInterface:
@@ -207,6 +211,10 @@ class TransactionInterface:
             )
         )
         token_metadata = await metadata.get_metadata(client, mint_account)
+
+        if token_metadata == {}:
+            raise ValueError("Token metadata not found")
+
         data = token_metadata["data"]
         update_metadata_data = await metadata.update_metadata_instruction_data(
             data["name"],
@@ -359,7 +367,8 @@ class TokenFlow:
         return {"response": resp}
 
 
-class PermanentStorage:
+class StorageService:
+    """A service for storing data into an immediate database or permanent storage."""
 
     endpoint_url: str
     headers: dict[str, str]
@@ -380,7 +389,7 @@ class PermanentStorage:
             ).decode(),
         )
 
-    async def upload_permanent_object(self, object: dict[str, tuple[str, bytes]]):
+    async def upload_permanent_object(self, object_: dict[str, tuple[str, bytes]]):
         """Permanently store objects to a decentralized cloud storage.
 
         Args:
@@ -396,7 +405,7 @@ class PermanentStorage:
         """
         form_data = aiohttp.FormData()
 
-        for filename, file_object in object.items():
+        for filename, file_object in object_.items():
             form_data.add_field(
                 name="file",
                 value=file_object[1],
@@ -410,3 +419,60 @@ class PermanentStorage:
             raise ConnectionError(str(err)) from err
 
         return await response.json()
+
+    async def store_issuance_meta(self, recipient_ecerts: dict[str, dict[str, str]]):
+        try:
+            response = await self.session.post(url=STORAGES, json=recipient_ecerts)
+        except aiohttp.ClientConnectionError as err:
+            raise ConnectionError(str(err)) from err
+
+        return await response.json()
+
+
+class Emailer:  # pylint: disable=R0903
+    """Represents a client that handles email sending."""
+
+    def __init__(
+        self, sender_address: str, sender_password: str, smtp_server_url: str
+    ) -> None:
+        self.sender_address = sender_address
+        self.sender_password = sender_password
+        self.smtp_session = smtplib.SMTP(smtp_server_url, 587)
+        self.smtp_session.starttls()
+        self.smtp_session.login(self.sender_address, self.sender_password)
+
+    def _send_message(
+        self, message: multipart.MIMEMultipart, receiver_addr: str
+    ) -> str | None:
+        try:
+            text_ = message.as_string()
+            self.smtp_session.sendmail(self.sender_address, receiver_addr, text_)
+        except smtplib.SMTPException as smtp_err:
+            return str(smtp_err)
+        return None
+
+    async def alt_send_message(
+        self, receiver_address: str, subject: str, content: str
+    ) -> str | None:
+        """Send an email with a MIME type of multipart/alternative.
+
+        Args:
+            receiver_address (str): The email address of the recipient.
+            subject (str): The subject of the email.
+            content (str): The content of the email.
+
+        Returns:
+            str | None: The error message if any.
+        """
+        message = multipart.MIMEMultipart()
+        message["From"] = self.sender_address
+        message["To"] = receiver_address
+        message["Subject"] = subject
+
+        message.attach(text.MIMEText(content, "plain"))
+
+        loop = asyncio.get_running_loop()
+
+        return await loop.run_in_executor(
+            None, self._send_message, message, receiver_address
+        )

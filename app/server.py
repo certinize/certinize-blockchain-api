@@ -1,9 +1,11 @@
+# pylint: disable=E1101
 """
 app.server
 ~~~~~~~~~~
 
 This module contains the server startup logic.
 """
+import ast
 import asyncio
 import dataclasses
 import datetime
@@ -18,6 +20,7 @@ import orjson
 import pydantic
 import uvloop
 import xxhash
+from solana.rpc import types
 
 from app import bindings, errors, events, middlewares, models, services
 from app.utils import requests
@@ -34,8 +37,10 @@ app.exceptions_handlers[errors.BadRequest] = errors.error_400_handler  # type: i
 app.middlewares.append(middlewares.MediaTypeValidator())
 
 # Dependencies
-app.on_start += events.create_client
-app.on_stop += events.dispose_client
+app.on_start += events.create_storage_svcs_client
+app.on_start += events.create_gmail_client
+app.on_stop += events.dispose_storage_svcs_client
+app.on_stop += events.dispose_gmail_client
 
 
 @dataclasses.dataclass
@@ -55,8 +60,54 @@ async def index() -> dict[str, str]:
 @app.router.post("/issuances")
 async def issue_certificate(
     data: bindings.FromIssuanceRequestModel[models.IssuanceRequest],
-    permanent_storage: services.PermanentStorage,
+    storage_svcs: services.StorageService,
+    emailer: services.Emailer,
 ) -> typing.Any:
+    cfg = {
+        "public_key": data.value.issuer_meta.issuer_pubkey,
+        "private_key": data.value.issuer_meta.issuer_pvtket,
+    }
+    txn_intf = services.TokenFlow(cfg=cfg)
+
+    # Deploy NFTs and map the recipient public keys to the tokens. Doing this allows us
+    # to check in advance for any issues, like if recipient has insufficient funds to
+    # pay for the issuance/mint.
+    token_accounts: dict[str, dict[str, types.RPCResponse | str | None]] = {}
+
+    # On any error with deploying an NFT, we store the recipient wallet addresses where
+    # the error occurred. This may be used to send a refund to the recipients or prompt
+    # the issuer to perform the issuance again.
+    acc_w_insuf_funds: dict[str, str | None] = {}
+
+    for recipient in data.value.recipient_meta:
+        nft_id = str(time.time())
+
+        try:
+            token_account = await txn_intf.deploy(
+                api_endpoint=services.SOLANA_API_ENDPOINT,
+                name=xxhash.xxh32(nft_id).hexdigest(),
+                symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
+            )
+            token_accounts[recipient.recipient_wallet_address] = token_account
+        except RuntimeError as err:
+            # For some reason, the solana library returns the error detail as a string
+            # repr of a dict. Here is an example error msg:
+            # Failed attempt 0: {
+            #   "code":-32002,
+            #   "message":"Transaction simulation failed: Attempt... (truncated)",
+            #   "data":{
+            #     "accounts":"None",
+            #     "err":"AccountNotFound",
+            #     "logs":[
+            #     ],
+            #     "unitsConsumed":0
+            #   }
+            # }
+            acc_w_insuf_funds[recipient.recipient_wallet_address] = ast.literal_eval(
+                str(err).replace("Failed attempt 0: ", "")
+            ).get("message")
+            token_account = {}
+
     # * We have to store the generated file names (xxh3_64) for later retreival with
     # * their corresponding RecipientMeta.recipient_user_id as the key. File names are
     # * used to associate recipients to their respective certificates.
@@ -65,9 +116,10 @@ async def issue_certificate(
     http_client = aiohttp.ClientSession()
     image_files: dict[str, tuple[str, bytes]] = {}
 
-    # Construct the request body for the upload of e-Certificates.
+    # Construct the request body for the upload of e-Certificates to permanent storage.
     for recipient in data.value.recipient_meta:
-        filename = f"{xxhash.xxh3_64(str(datetime.datetime.now().timestamp())).hexdigest()}.jpeg"
+        time_ = str(datetime.datetime.now().timestamp())
+        filename = f"{xxhash.xxh3_64(time_).hexdigest()}.jpeg"
         filenames[str(recipient.recipient_user_id)] = filename
 
         certificate_src = await requests.get_files(
@@ -80,7 +132,7 @@ async def issue_certificate(
 
     # Upload e-Certificates to permanent storage (IPFS). The response values will be
     # used later to verify if the files were uploaded successfully.
-    response = await permanent_storage.upload_permanent_object(image_files)
+    response = await storage_svcs.upload_permanent_object(image_files)
     resp_val = response["response_meta"]["value"]
     cid = resp_val["cid"]
     files: list[dict[str, str]] = resp_val["files"]
@@ -107,12 +159,12 @@ async def issue_certificate(
     nft_metas_coll: list[dict[str, typing.Any]] = []
 
     for recipient in data.value.recipient_meta:
-        # Although we stored the generated file names earlier, we still have to check
-        # if they were successfully uploaded. To do so, we simply have to check if file
-        # name is in the response. We retrieve the file/ecert name from the response
-        # using the recipient_user_id and construct the ecert URL. This is much safer
-        # than matching by index, which might cause recipients to receive incorrect
-        # e-Certifiactes.
+        # Although we stored the generated file names earlier for retrieval, we still
+        # have to check if they were successfully uploaded. To do so, we simply have to
+        # check if file name is in the response. We retrieve the file/ecert name from
+        # the response using the recipient_user_id and construct the ecert URL. This is
+        # much safer than matching by index, which might cause recipients to receive
+        # incorrect e-Certifiactes.
         ecert_url = ""
 
         for file in files:
@@ -132,8 +184,8 @@ async def issue_certificate(
                 }
                 break
 
-        # Naturally, if ecert_fname is empty, then the file was not uploaded. We skip
-        # the current iteration.
+        # Naturally, if ecert_fname is empty, the file was not uploaded. We skip the
+        # current iteration.
         if ecert_url == "":
             continue
 
@@ -150,7 +202,7 @@ async def issue_certificate(
         # combibe the recipient's initials and the xxhash of the current date and time.
         symbol = (
             "".join([name[0].upper() for name in recipient.recipient_name.split(" ")])
-            + f"""-{xxhash.xxh3_64(str(datetime.datetime.today())).hexdigest().upper()}"""
+            + f"-{xxhash.xxh3_64(str(datetime.datetime.today())).hexdigest().upper()}"
         )
 
         # We have to generate the nft_meta inside a pydantic model to ensure the
@@ -180,7 +232,13 @@ async def issue_certificate(
                 "nft_meta"
             ] = f"""{nft_meta["symbol"]}.json"""
         except ValueError as val_err:
-            raise blacksheep.exceptions.InternalServerError(str(val_err))
+            return blacksheep.Response(
+                status=500,
+                content=blacksheep.Content(
+                    b"application/json",
+                    orjson.dumps({"detail": str(val_err)}),
+                ),
+            )
 
     # TODO: Return error code generating NFT metadata for all recipients failed.
     # * This could mean that the e-Certificates were not uploaded successfully.
@@ -195,7 +253,7 @@ async def issue_certificate(
             orjson.dumps(nft_meta),
         )
 
-    response = await permanent_storage.upload_permanent_object(json_meta)
+    response = await storage_svcs.upload_permanent_object(json_meta)
 
     # Mint token.
     cfg = {
@@ -216,29 +274,51 @@ async def issue_certificate(
                 )
                 break
 
-        result = await txn_intf.deploy(
-            api_endpoint=services.SOLANA_API_ENDPOINT,
-            name=xxhash.xxh32(nft_id).hexdigest(),
-            symbol="-".join([char for char in xxhash.xxh3_64(nft_id).hexdigest()[:5]]),
-        )
+        token_account = token_accounts.get(recipient.recipient_wallet_address)
 
-        if isinstance(contract_key := result["contract"], str):
-            mint_res = await txn_intf.mint(
+        if token_account is not None:
+            contract_key = token_account["contract"]
+        else:
+            contract_key = None
+
+        if isinstance(contract_key, str):
+            mint_result = await txn_intf.mint(
                 api_endpoint=services.SOLANA_API_ENDPOINT,
                 contract_key=contract_key,
                 destination_key=recipient.recipient_wallet_address,
                 link=nft_meta_url,
             )
 
-            if (rpc_resp := mint_res["response"]) is not None:
+            if (rpc_resp := mint_result["response"]) is not None:
                 recipient_ecerts[recipient.recipient_wallet_address][
                     "transaction_sig"
                 ] = dict(rpc_resp)["result"]
 
-    # TODO:
-    # Insert issuance information into immediate database (API Call to recipient-db)
-    # Email recipients and notify them of the issuance
-    # Email issuer and notify them of the issuance
+    # TODO: Insert issuance information into immediate database (Make API call).
+    # _ = await storage_svcs.store_issuance_meta(recipient_ecerts)
+
+    print(acc_w_insuf_funds)
+    print(recipient_ecerts)
+
+    for recipient in data.value.recipient_meta:
+        if recipient.recipient_wallet_address in acc_w_insuf_funds:
+            continue
+
+        email_result = await emailer.alt_send_message(
+            recipient.recipient_email,
+            "Certificate Issuance",
+            "Your e-Certificate has been issued.",
+        )
+
+        # TODO: Log errors
+        if email_result is not None:
+            print(email_result)
+
+    await emailer.alt_send_message(
+        data.value.issuer_meta.issuer_email,
+        "Certificate Issuance",
+        "E-Certificates have been issued.",
+    )
 
     await http_client.close()
 

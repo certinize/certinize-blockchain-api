@@ -1,4 +1,4 @@
-# noqa: E203
+# flake8: noqa
 # pylint: disable=R0913,R0914
 """
 app.metadata
@@ -108,33 +108,54 @@ def unpack_metadata_account(
     return metadata
 
 
-async def get_metadata(
-    client: api.Client, mint_key: publickey.PublicKey
-) -> dict[str, typing.Any]:
-    loop = asyncio.get_running_loop()
-    metadata_account = await get_metadata_account(mint_key)
+async def _get_acc_val(
+    loop: asyncio.AbstractEventLoop,
+    client: api.Client,
+    metadata_account: publickey.PublicKey,
+):
     account_info = await loop.run_in_executor(
         None, client.get_account_info, metadata_account
     )
-    result = account_info.get("result")
-    assert result is not None
-    value = result["value"]
+    return account_info.get("result")
 
-    while value is None:
+
+async def get_metadata(
+    client: api.Client, mint_key: publickey.PublicKey
+) -> dict[str, typing.Any]:
+    metadata_account = await get_metadata_account(mint_key)
+    result: dict[str, typing.Any] | None = None
+    value = None
+    loop = asyncio.get_running_loop()
+
+    # Only wait for the account value until a reasonable amount of time. We don't want
+    # the process to run for too long. If the value is still not available, we simply
+    # give up. Just log the error, notify the issuer, and give a refund.
+    max_attempts = 60
+    for _ in range(max_attempts):
+        result = await _get_acc_val(loop, client, metadata_account)
+
+        if result is not None:
+            value = result["value"]
+        else:
+            # For now, we won't count this as an attempt as there hasn't been any
+            # reported issue regarding retrieval of account info for a public key.
+            max_attempts += 1
+            continue
+
+        if value is not None:
+            break
+
         await asyncio.sleep(1)
-        account_info = await loop.run_in_executor(
-            None, client.get_account_info, metadata_account
-        )
-        result = account_info.get("result")
-        assert result is not None
-        value = result["value"]
-        print(value)
 
-    print(value)
+    if value is None:
+        raise RuntimeError("Could not get account value")
 
-    data = base64.b64decode(result["value"]["data"][0])
-    metadata = unpack_metadata_account(data)
-    return metadata
+    if result is not None:
+        data = base64.b64decode(result["value"]["data"][0])
+        metadata = unpack_metadata_account(data)
+        return metadata
+
+    return {}
 
 
 async def get_edition(mint_key: publickey.PublicKey):
