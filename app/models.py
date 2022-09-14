@@ -4,8 +4,6 @@ app.models
 
 This module contains pydantic validation schemas for the API.
 """
-import uuid
-
 import pydantic
 from nacl.bindings import crypto_core
 from solana import publickey
@@ -34,10 +32,11 @@ class RecipientMeta(pydantic.BaseModel):
 
 
 class IssuerMeta(pydantic.BaseModel):
-    external_url: pydantic.HttpUrl
     issuer_email: pydantic.EmailStr
     issuer_pubkey: str
     issuer_pvtket: str
+    issuer_address: str | None = None
+    issuer_website: pydantic.HttpUrl | None = None
 
     @pydantic.validator("issuer_pubkey")
     @classmethod
@@ -55,7 +54,6 @@ class IssuerMeta(pydantic.BaseModel):
 
 class IssuanceRequest(pydantic.BaseModel):
     callback_endpoint: pydantic.HttpUrl
-    correlation_id: uuid.UUID
     issuer_meta: IssuerMeta
     recipient_meta: list[RecipientMeta]
 

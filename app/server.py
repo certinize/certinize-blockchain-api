@@ -216,7 +216,7 @@ async def issue_certificate(
                     symbol=symbol,
                     description=recipient.issuance_description,
                     image=pydantic.HttpUrl(url=ecert_url, scheme="https"),
-                    external_url=data.value.issuer_meta.external_url,
+                    external_url=data.value.issuer_meta.issuer_website,
                     attributes=[
                         {"trait_type": "identification", "value": certificate_id},
                         {
@@ -296,6 +296,7 @@ async def issue_certificate(
 
     # TODO: Insert issuance information into immediate database (Make API call).
     # _ = await storage_svcs.store_issuance_meta(recipient_ecerts)
+    response = await storage_svcs.upload_permanent_object(json_meta)
 
     print(acc_w_insuf_funds)
     print(recipient_ecerts)
