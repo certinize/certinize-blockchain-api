@@ -57,4 +57,4 @@ start-dev: ## start the app on dev
 	uvicorn app.server:app --reload
 
 kill-app: ## kill the app running on port 8000
-	kill -9 $(sudo lsof -t -i:8000)
+	kill -9 $$(sudo lsof -t -i:8000)
