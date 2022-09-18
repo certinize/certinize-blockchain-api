@@ -12,7 +12,6 @@ import datetime
 import smtplib
 import time
 import typing
-import uuid
 from email.mime import multipart, text
 
 import aiohttp
@@ -534,11 +533,13 @@ class IssuanceUtil:
             #   }
             # }
             try:
+                print("1.1. Creating token account...")
                 token_account = await txn_intf.deploy(
                     api_endpoint=SOLANA_API_ENDPOINT,
                     name=xxhash.xxh32(nft_id).hexdigest(),
                     symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
                 )
+                print("1.2. Created!")
                 token_accounts[recipient.recipient_wallet_address] = token_account
             except RuntimeError as err:
                 insuf_funds_reached[
@@ -617,7 +618,7 @@ class IssuanceUtil:
         # Use the current year and month as the first part of the certificate's unique
         # identifier. This will be used to name the public data storage (JSON file) that
         # that will help verify e-Certificate legitimacy.
-        yr_mth = datetime.datetime.today().strftime("%Y-%m")
+        # yr_mth = datetime.datetime.today().strftime("%Y-%m")
 
         # nft_meta_coll is a collection of dictionaries containing NFT metadata. They
         # will be converted to JSON and uploaded to a permanent storage.
@@ -695,16 +696,9 @@ class IssuanceUtil:
                     external_url=request.issuer_meta.issuer_website,
                     attributes=[
                         {
-                            "trait_type": "verification_ID",
-                            "value": (
-                                f"""{xxhash.xxh3_64(yr_mth).hexdigest()}-"""
-                                f"""{xxhash.xxh3_64(f"{uuid.uuid1()}").hexdigest()}"""
-                            ),
-                        },
-                        {
-                            "trait_type": "issuer",
-                            "value": request.issuer_meta.issuer_pubkey,
-                        },
+                            "trait_type": "verification",
+                            "value": "https://verification.com",
+                        }
                     ],
                 )
             )
