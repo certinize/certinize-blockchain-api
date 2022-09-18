@@ -10,10 +10,8 @@ from solana import publickey
 
 
 class RecipientMeta(pydantic.BaseModel):
-    issuance_description: str
     recipient_email: pydantic.EmailStr
     recipient_name: str
-    recipient_user_id: pydantic.UUID1
     recipient_wallet_address: str
     recipient_ecert_url: pydantic.HttpUrl
 
@@ -32,6 +30,7 @@ class RecipientMeta(pydantic.BaseModel):
 
 
 class IssuerMeta(pydantic.BaseModel):
+    issuer_name: str
     issuer_email: pydantic.EmailStr
     issuer_pubkey: str
     issuer_pvtket: str

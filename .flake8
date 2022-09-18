@@ -1,2 +1,7 @@
 [flake8]
 max-line-length = 88
+ignore =
+    # line break before binary operator
+    W503,
+    # White space before :
+    E203

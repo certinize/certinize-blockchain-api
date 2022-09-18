@@ -32,7 +32,7 @@ clean-pyc: ## remove Python file artifacts
 	find . -name '__pycache__' -exec rm -fr {} +
 
 lint: ## check style with flake8
-	flake8 app --ignore=E203
+	flake8 app
 	pylint app --rcfile=.pylintrc
 
 dist: clean ## build source and wheel package

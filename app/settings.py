@@ -18,7 +18,7 @@ json.use(  # type: ignore
 
 
 class AppSettings(pydantic.BaseSettings):
-    certinize_image_processor = pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(
+    certinize_object_processor = pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(
         url="https://", scheme="https"
     )
     certinize_api_key: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
