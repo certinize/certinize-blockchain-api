@@ -540,13 +540,11 @@ class IssuanceUtil:
                     symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
                 )
                 print("1.2. Created!")
-                token_accounts[recipient.recipient_wallet_address] = token_account
+                token_accounts[recipient.recipient_pubkey] = token_account
             except RuntimeError as err:
-                insuf_funds_reached[
-                    recipient.recipient_wallet_address
-                ] = ast.literal_eval(str(err).replace("Failed attempt 0: ", "")).get(
-                    "message"
-                )
+                insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
+                    str(err).replace("Failed attempt 0: ", "")
+                ).get("message")
                 token_account = {}
 
         return (token_accounts, insuf_funds_reached, txn_intf)
@@ -567,7 +565,7 @@ class IssuanceUtil:
             tuple[dict[str, str], dict[str, tuple[str, bytes]]]: Used variables.
         """
         # * We have to store the generated file names (xxh3_64) for later retreival with
-        # * their corresponding RecipientMeta.recipient_wallet_address as the key. File
+        # * their corresponding RecipientMeta.recipient_pubkey as the key. File
         # * names are used to associate recipients to their respective certificates.
         filenames: dict[str, str] = {}
         http_client = aiohttp.ClientSession()
@@ -576,12 +574,12 @@ class IssuanceUtil:
         # Construct the request body for the upload of e-Certificates to permanent
         # storage.
         for recipient in request.recipient_meta:
-            if recipient.recipient_wallet_address not in token_accounts:
+            if recipient.recipient_pubkey not in token_accounts:
                 continue
 
             time_ = str(datetime.datetime.now().timestamp())
             filename = f"{xxhash.xxh3_64(time_).hexdigest()}.jpeg"
-            filenames[recipient.recipient_wallet_address] = filename
+            filenames[recipient.recipient_pubkey] = filename
 
             certificate_src = await requests.get_files(
                 http_client, recipient.recipient_ecert_url
@@ -625,13 +623,13 @@ class IssuanceUtil:
         nft_metas_coll: list[dict[str, typing.Any]] = []
 
         for recipient in request.recipient_meta:
-            if recipient.recipient_wallet_address not in token_accounts:
+            if recipient.recipient_pubkey not in token_accounts:
                 continue
 
             # Although we stored the generated file names earlier for retrieval, we
             # still have to check if they were successfully uploaded. To do so, we
             # simply have to check if file name is in the response. We retrieve the
-            # file/ecert name from the response using the recipient_wallet_address and
+            # file/ecert name from the response using the recipient_pubkey and
             # construct the ecert URL. This is much safer than matching by index, which
             # might cause recipients to receive incorrect e-Certifiactes.
             ecert_url = ""
@@ -641,12 +639,12 @@ class IssuanceUtil:
                 # {"name": "5c630887.jpeg", "type": "image/jpeg"}
                 ecert_fname = file.get("name")
 
-                if ecert_fname == filenames.get(recipient.recipient_wallet_address):
+                if ecert_fname == filenames.get(recipient.recipient_pubkey):
                     ecert_url = IssuanceUtil.nft_storage_link.format(
                         cid=cid, filename=file["name"]
                     )
 
-                    recipient_ecerts[recipient.recipient_wallet_address] = {
+                    recipient_ecerts[recipient.recipient_pubkey] = {
                         "filename": ecert_fname,
                         "nft_meta": "",
                         "transaction_sig": "",
@@ -704,7 +702,7 @@ class IssuanceUtil:
             )
 
             nft_metas_coll.append(nft_meta)
-            recipient_ecerts[recipient.recipient_wallet_address][
+            recipient_ecerts[recipient.recipient_pubkey][
                 "nft_meta"
             ] = f"""{nft_meta["symbol"]}.json"""
 
@@ -721,7 +719,7 @@ class IssuanceUtil:
     ) -> types.MintResult:
         for recipient in request.recipient_meta:
             nft_meta_url = ""
-            nft_meta = recipient_ecerts[recipient.recipient_wallet_address]["nft_meta"]
+            nft_meta = recipient_ecerts[recipient.recipient_pubkey]["nft_meta"]
 
             # Iterate through the uploaded NFT metadata to find the one that matches
             # the current recipient's assigned NFT metadata.
@@ -732,7 +730,7 @@ class IssuanceUtil:
                     )
                     break
 
-            token_account = token_accounts.get(recipient.recipient_wallet_address)
+            token_account = token_accounts.get(recipient.recipient_pubkey)
 
             if token_account is not None:
                 contract_key = token_account["contract"]
@@ -744,17 +742,17 @@ class IssuanceUtil:
                     mint_result = await txn_intf.mint(
                         api_endpoint=SOLANA_API_ENDPOINT,
                         contract_key=contract_key,
-                        destination_key=recipient.recipient_wallet_address,
+                        destination_key=recipient.recipient_pubkey,
                         link=nft_meta_url,
                     )
                 except RuntimeError as exc:
                     # * We have to record the failure and email the details to the
                     # * issuer.
-                    failure_reached[recipient.recipient_wallet_address] = str(exc)
+                    failure_reached[recipient.recipient_pubkey] = str(exc)
                     continue
 
                 if (rpc_resp := mint_result["response"]) is not None:
-                    recipient_ecerts[recipient.recipient_wallet_address][
+                    recipient_ecerts[recipient.recipient_pubkey][
                         "transaction_sig"
                     ] = dict(rpc_resp)["result"]
 
@@ -773,22 +771,22 @@ class IssuanceUtil:
         recipient_emails: dict[str, str] = {}
 
         for recipient in request.recipient_meta:
-            if recipient.recipient_wallet_address in failure_reached:
+            if recipient.recipient_pubkey in failure_reached:
                 failed_recipients += (
                     f"<hr>{recipient.recipient_name} | "
-                    f"{recipient.recipient_wallet_address}<br>"
-                    f"{failure_reached[recipient.recipient_wallet_address]}<br>"
+                    f"{recipient.recipient_pubkey}<br>"
+                    f"{failure_reached[recipient.recipient_pubkey]}<br>"
                 )
             else:
                 success_recipients += (
                     f"<hr>{recipient.recipient_name} | "
-                    f"{recipient.recipient_wallet_address}<br>"
+                    f"{recipient.recipient_pubkey}<br>"
                 )
                 recipient_emails[
-                    recipient.recipient_wallet_address
+                    recipient.recipient_pubkey
                 ] = recipient_template.format(
                     issuer=request.issuer_meta.issuer_name,
-                    details=recipient_ecerts.get(recipient.recipient_wallet_address),
+                    details=recipient_ecerts.get(recipient.recipient_pubkey),
                 )
 
         return (
@@ -806,13 +804,13 @@ class IssuanceUtil:
         recipient_emails: dict[str, str],
     ) -> None:
         for recipient in request.recipient_meta:
-            if recipient.recipient_wallet_address not in recipient_emails:
+            if recipient.recipient_pubkey not in recipient_emails:
                 continue
 
             result = await emailer.alt_send_message(
                 recipient.recipient_email,
                 "E-Certificate Issuance",
-                recipient_emails[recipient.recipient_wallet_address],
+                recipient_emails[recipient.recipient_pubkey],
             )
 
             # TODO: Log errors
@@ -936,3 +934,5 @@ class IssuanceUtil:
             issuer_email,
             recipient_emails,
         )
+
+        print("Done!")

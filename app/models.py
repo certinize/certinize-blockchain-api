@@ -4,20 +4,25 @@ app.models
 
 This module contains pydantic validation schemas for the API.
 """
+import re
+
 import pydantic
+import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 from nacl.bindings import crypto_core
 from solana import publickey
+
+PanicException = re.compile(r"\((.*?)\)")
 
 
 class RecipientMeta(pydantic.BaseModel):
     recipient_email: pydantic.EmailStr
     recipient_name: str
-    recipient_wallet_address: str
+    recipient_pubkey: str
     recipient_ecert_url: pydantic.HttpUrl
 
-    @pydantic.validator("recipient_wallet_address")
+    @pydantic.validator("recipient_pubkey")
     @classmethod
-    def recipient_wallet_address_on_curve(cls, value: str):
+    def recipient_pubkey_on_curve(cls, value: str):
         try:
             crypto_core.crypto_core_ed25519_is_valid_point(
                 bytes(publickey.PublicKey(value))
@@ -50,9 +55,19 @@ class IssuerMeta(pydantic.BaseModel):
 
         return value
 
+    @pydantic.validator("issuer_pvtket")
+    @classmethod
+    def recipient_pvtkey_on_curve(cls, value: str):
+        try:
+            solders_keypair.Keypair().from_base58_string(value)
+        except BaseException as base_err:
+            raise ValueError(PanicException.findall(str(base_err))[1]) from base_err
+
+        return value
+
 
 class IssuanceRequest(pydantic.BaseModel):
-    callback_endpoint: pydantic.HttpUrl
+    callback_endpoint: pydantic.AnyHttpUrl
     issuer_meta: IssuerMeta
     recipient_meta: list[RecipientMeta]
 
