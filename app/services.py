@@ -137,7 +137,7 @@ class ExecutionInterface:
         api_endpoint: str,
         txn: transaction.Transaction,
         signers: list[keypair.Keypair],
-        max_retries: int = 3,
+        max_attempts: int = 3,
         skip_confirmation: bool = True,
         max_timeout: int = 60,
         target: int = 20,
@@ -146,7 +146,12 @@ class ExecutionInterface:
         client = api.Client(api_endpoint)
         # signers = await self.remove_duplicate(signers)
 
-        for attempt in range(max_retries):
+        if max_attempts < 1:
+            raise ValueError("Max retries must be greater than 0")
+
+        while max_attempts > 0:
+            max_attempts -= 1
+
             try:
                 result = client.send_transaction(
                     txn, *signers, opts=rpc_types.TxOpts(skip_preflight=False)
@@ -160,7 +165,8 @@ class ExecutionInterface:
 
                 return result
             except Exception as err:  # pylint: disable=W0703
-                raise RuntimeError(f"Failed attempt {attempt}: {err}") from err
+                if max_attempts == 0:
+                    raise RuntimeError(f"Failed: {err}") from err
 
 
 class TransactionInterface:
@@ -384,7 +390,7 @@ class TokenFlow:
             api_endpoint,
             txn,
             signers,
-            max_retries=self.max_retries,
+            max_attempts=self.max_retries,
             skip_confirmation=self.skip_confirmation,
             max_timeout=self.max_timeout,
             target=self.target,
@@ -413,7 +419,7 @@ class TokenFlow:
             api_endpoint,
             txn,
             signers,
-            max_retries=self.max_retries,
+            max_attempts=self.max_retries,
             skip_confirmation=self.skip_confirmation,
             max_timeout=self.max_timeout,
             target=self.target,
@@ -911,7 +917,7 @@ class IssuanceUtil:
         reference_id: str,
         completed_steps: list[str],
     ):
-        if len(completed_steps) == 8:
+        if len(completed_steps) >= 8:
             message = "Successfully fulfilled issuance request."
             level = "info"
         else:
@@ -1011,7 +1017,7 @@ class IssuanceUtil:
             recipient_emails,
         )
 
-        completed_steps.append("8. Successfully fulfilled issuance request.")
+        completed_steps.append("8. Done.")
 
         await IssuanceUtil.log_issuance_result(
             logger,
