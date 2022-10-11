@@ -11,4 +11,5 @@ CreateTokenResult = tuple[
     dict[str, dict[str, rpc_types.RPCResponse | str | None]],
     dict[str, str | None],
     typing.Any,
+    list[str],
 ]

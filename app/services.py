@@ -12,6 +12,7 @@ import datetime
 import smtplib
 import time
 import typing
+import uuid
 from email.mime import multipart, text
 
 import aiohttp
@@ -32,6 +33,52 @@ from app.utils import metadata, requests
 STORAGES = "/storages"
 ISSUANCES = "/issuances"
 SOLANA_API_ENDPOINT = "https://api.devnet.solana.com"
+LOGS = "/logs"
+
+
+class LoggerService:
+    """."""
+
+    endpoint_url: str
+    client: aiohttp.ClientSession
+
+    def __init__(self, endpoint_url: str) -> None:
+        self.endpoint_url = endpoint_url
+        self.client = aiohttp.ClientSession(base_url=self.endpoint_url)
+
+    async def add_log_entry(
+        self,
+        id: str,
+        created_at: str,
+        message: str,
+        raw: str,
+        level: str,
+        source: str = "blockchain-api",
+    ) -> None:
+        """Log a message to the logger service.
+
+        Args:
+            id (str): The id of the log entry which should be a UUIDv4 string.
+            created_at (str): The timestamp of the log entry.
+            message (str): A short message, like a title.
+            raw (dict[str, str]): Details pertaining to the log entry.
+            level (str): The level of the log entry. One of: "info", "warn", "error".
+            source (str, optional): The name of the web service where the log entry
+                originated. Defaults to "blockchain-api".
+        """
+        asyncio.create_task(
+            self.client.post(
+                LOGS,
+                json={
+                    "id": id,
+                    "created_at": created_at,
+                    "message": message,
+                    "raw": raw,
+                    "level": level,
+                    "source": source,
+                },
+            )
+        )
 
 
 class ExecutionInterface:
@@ -490,7 +537,7 @@ class IssuanceUtil:
 
     @staticmethod
     async def create_token_account(
-        request: models.IssuanceRequest,
+        request: models.IssuanceRequest, completed_steps: list[str]
     ) -> types.CreateTokenResult:
         """Create token accounts and map the recipient public keys to the tokens.
 
@@ -533,13 +580,16 @@ class IssuanceUtil:
             #   }
             # }
             try:
-                print("1.1. Creating token account...")
+                completed_steps.append("1.1. Creating token account.")
+
                 token_account = await txn_intf.deploy(
                     api_endpoint=SOLANA_API_ENDPOINT,
                     name=xxhash.xxh32(nft_id).hexdigest(),
                     symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
                 )
-                print("1.2. Created!")
+
+                completed_steps.append("1.2. Created!")
+
                 token_accounts[recipient.recipient_pubkey] = token_account
             except RuntimeError as err:
                 insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
@@ -547,7 +597,7 @@ class IssuanceUtil:
                 ).get("message")
                 token_account = {}
 
-        return (token_accounts, insuf_funds_reached, txn_intf)
+        return (token_accounts, insuf_funds_reached, txn_intf, completed_steps)
 
     @staticmethod
     async def create_img_upload_request(
@@ -807,15 +857,11 @@ class IssuanceUtil:
             if recipient.recipient_pubkey not in recipient_emails:
                 continue
 
-            result = await emailer.alt_send_message(
+            _ = await emailer.alt_send_message(
                 recipient.recipient_email,
                 "E-Certificate Issuance",
                 recipient_emails[recipient.recipient_pubkey],
             )
-
-            # TODO: Log errors
-            if result is not None:
-                print(result)
 
         await emailer.alt_send_message(
             request.issuer_meta.issuer_email,
@@ -860,10 +906,33 @@ class IssuanceUtil:
         return (recipient_ecerts, uploaded_nft_meta)
 
     @staticmethod
+    async def log_issuance_result(
+        logger: LoggerService,
+        reference_id: str,
+        completed_steps: list[str],
+    ):
+        if len(completed_steps) == 8:
+            message = "Successfully fulfilled issuance request."
+            level = "info"
+        else:
+            message = "Failed to fulfill issuance request."
+            level = "error"
+
+        await logger.add_log_entry(
+            str(reference_id),
+            str(datetime.datetime.utcnow()),
+            message,
+            "\n".join(completed_steps),
+            level,
+        )
+
+    @staticmethod
     async def issue_certificate(
         request: models.IssuanceRequest,
         storage_svcs: StorageService,
         emailer: Emailer,
+        reference_id: uuid.UUID,
+        logger: LoggerService,
     ) -> None:
         """Handler service for issuance requests.
 
@@ -872,17 +941,20 @@ class IssuanceUtil:
             storage_svcs (StorageService): Storage service object.
             emailer (Emailer): Emailer object.
         """
+        completed_steps: list[str] = []
         filenames: dict[str, str] = {}
 
-        print("1. Creating token accounts...")
+        completed_steps.append("1. Creating token accounts.")
+
         (
             token_accounts,
             failure_reached,
             txn_intf,
-        ) = await IssuanceUtil.create_token_account(request)
+            completed_steps,
+        ) = await IssuanceUtil.create_token_account(request, completed_steps)
 
         if token_accounts != {}:
-            print("2. Uploading e-Certificates...")
+            completed_steps.append("2. Uploading e-Certificates.")
 
             filenames, uploaded_nft_meta = await IssuanceUtil.upload_ecerts(
                 request, token_accounts, storage_svcs
@@ -892,7 +964,7 @@ class IssuanceUtil:
             cid = resp_val["cid"]
             files: list[dict[str, str]] = resp_val["files"]
 
-            print("3. Creating nft metadata...")
+            completed_steps.append("3. Creating nft metadata.")
             nft_metadata = await IssuanceUtil.create_nft_metadata(
                 request, token_accounts, files, filenames, cid
             )
@@ -900,13 +972,15 @@ class IssuanceUtil:
             nft_metadata = None
 
         if isinstance(nft_metadata, tuple):
-            print("4. Uploading nft metadata...")
+            completed_steps.append("4. Uploading nft metadata.")
+
             (
                 recipient_ecerts,
                 uploaded_nft_meta,
             ) = await IssuanceUtil.upload_nft_metadata(nft_metadata, storage_svcs)
 
-            print("5. Minting NFT...")
+            completed_steps.append("5. Minting NFT.")
+
             recipient_ecerts, failure_reached = await IssuanceUtil.mint_nft(
                 request,
                 recipient_ecerts,
@@ -918,7 +992,8 @@ class IssuanceUtil:
         else:
             recipient_ecerts = {}
 
-        print("6. Constructing Email...")
+        completed_steps.append("6. Constructing Email.")
+
         issuer_email, recipient_emails = await IssuanceUtil.construct_email_body(
             request,
             emails.RECIPIENT_EMAIL_TEMPLATE,
@@ -927,7 +1002,8 @@ class IssuanceUtil:
             recipient_ecerts,
         )
 
-        print("7. Emailing involved parties...")
+        completed_steps.append("7. Emailing involved parties.")
+
         await IssuanceUtil.email_involved_parties(
             request,
             emailer,
@@ -935,4 +1011,10 @@ class IssuanceUtil:
             recipient_emails,
         )
 
-        print("Done!")
+        completed_steps.append("8. Successfully fulfilled issuance request.")
+
+        await IssuanceUtil.log_issuance_result(
+            logger,
+            str(reference_id),
+            completed_steps,
+        )

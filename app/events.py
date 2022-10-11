@@ -30,5 +30,13 @@ async def dispose_gmail_client(app: blacksheep.Application):
     email.smtp_session.close()
 
 
-async def get_issuance_util(app: blacksheep.Application):
-    app.services.add_instance(services.IssuanceUtil())  # type: ignore
+async def create_logger_svcs_client(app: blacksheep.Application):
+    logger = services.LoggerService(
+        endpoint_url=settings.app_settings.cerog,
+    )
+    app.services.add_instance(logger)  # type: ignore
+
+
+async def dispose_logger_svcs_client(app: blacksheep.Application):
+    logger: services.LoggerService = app.service_provider[services.LoggerService]
+    await logger.client.close()

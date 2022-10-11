@@ -7,6 +7,7 @@ This module contains the server startup logic.
 """
 import asyncio
 import platform
+import uuid
 
 import blacksheep
 import orjson
@@ -25,9 +26,12 @@ app.exceptions_handlers[errors.BadRequest] = errors.error_400_handler  # type: i
 # Dependencies
 app.on_start += events.create_storage_svcs_client
 app.on_start += events.create_gmail_client
-app.on_start += events.get_issuance_util
+app.on_start += events.create_logger_svcs_client
 app.on_stop += events.dispose_storage_svcs_client
 app.on_stop += events.dispose_gmail_client
+app.on_stop += events.dispose_logger_svcs_client
+
+app.services.add_exact_singleton(services.IssuanceUtil)  # type: ignore
 
 
 @app.router.get("/")
@@ -41,14 +45,25 @@ async def issue_certificate(
     storage_svcs: services.StorageService,
     issuance_util: services.IssuanceUtil,
     emailer: services.Emailer,
+    logger: services.LoggerService,
 ) -> blacksheep.Response:
+    reference_id = uuid.uuid4()
+
     asyncio.create_task(
-        issuance_util.issue_certificate(data.value, storage_svcs, emailer)
+        issuance_util.issue_certificate(
+            data.value, storage_svcs, emailer, reference_id, logger
+        )
     )
 
     return blacksheep.Response(
         status=202,
         content=blacksheep.Content(
-            b"application/json", orjson.dumps({"message": "Issuance request accepted"})
+            b"application/json",
+            orjson.dumps(
+                {
+                    "message": "Issuance request accepted",
+                    "reference_id": str(reference_id),
+                }
+            ),
         ),
     )
