@@ -9,6 +9,7 @@ import ast
 import asyncio
 import base64
 import datetime
+import re
 import smtplib
 import time
 import typing
@@ -598,9 +599,16 @@ class IssuanceUtil:
 
                 token_accounts[recipient.recipient_pubkey] = token_account
             except RuntimeError as err:
-                insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
-                    str(err).replace("Failed attempt 0: ", "")
-                ).get("message")
+                err_dict = re.search(r"\{.*\}", str(err))
+
+                if err_dict is not None:
+                    ast.literal_eval(err_dict.group(0))
+                    insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
+                        err_dict.group(0)
+                    ).get("message")
+                else:
+                    insuf_funds_reached[recipient.recipient_pubkey] = str(err)
+
                 token_account = {}
 
         return (token_accounts, insuf_funds_reached, txn_intf, completed_steps)
