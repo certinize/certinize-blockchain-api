@@ -75,8 +75,7 @@ class LoggerService:
                 json={
                     "id": id,
                     "created_at": created_at
-                    if created_at
-                    else str(datetime.datetime.now(pytz.timezone(self.timezone))),
+                    or str(datetime.datetime.now(pytz.timezone(self.timezone))),
                     "message": message,
                     "raw": raw,
                     "level": level,
