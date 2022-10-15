@@ -19,6 +19,7 @@ from email.mime import multipart, text
 import aiohttp
 import orjson
 import pydantic
+import pytz
 import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 import xxhash
 from solana import keypair, publickey, system_program, transaction
@@ -33,46 +34,49 @@ from app.utils import metadata, requests
 
 STORAGES = "/storages"
 ISSUANCES = "/issuances"
-SOLANA_API_ENDPOINT = "https://api.devnet.solana.com"
 LOGS = "/logs"
 
 
 class LoggerService:
-    """."""
+    """Client implementation for Certinize's log aggregation system, Cerog."""
 
     endpoint_url: str
+    timezone: str
     client: aiohttp.ClientSession
 
-    def __init__(self, endpoint_url: str) -> None:
+    def __init__(self, endpoint_url: str, timezone: str) -> None:
         self.endpoint_url = endpoint_url
+        self.timezone = timezone
         self.client = aiohttp.ClientSession(base_url=self.endpoint_url)
 
     async def add_log_entry(
         self,
         id: str,
-        created_at: str,
         message: str,
         raw: str,
         level: str,
         source: str = "blockchain-api",
+        created_at: str | None = None,
     ) -> None:
         """Log a message to the logger service.
 
         Args:
             id (str): The id of the log entry which should be a UUIDv4 string.
-            created_at (str): The timestamp of the log entry.
             message (str): A short message, like a title.
             raw (dict[str, str]): Details pertaining to the log entry.
             level (str): The level of the log entry. One of: "info", "warn", "error".
             source (str, optional): The name of the web service where the log entry
                 originated. Defaults to "blockchain-api".
+            created_at (str | None): The timestamp of the log entry.
         """
         asyncio.create_task(
             self.client.post(
                 LOGS,
                 json={
                     "id": id,
-                    "created_at": created_at,
+                    "created_at": created_at
+                    if created_at
+                    else str(datetime.datetime.now(pytz.timezone(self.timezone))),
                     "message": message,
                     "raw": raw,
                     "level": level,
@@ -541,77 +545,10 @@ class Emailer:  # pylint: disable=R0903
 class IssuanceUtil:
     nft_storage_link = "https://{cid}.ipfs.nftstorage.link/{filename}"
     filebase_link = "https://ipfs.filebase.io/ipfs/{cid}"
+    solana_api_endpoint = "https://api.mainnet-beta.solana.com"
 
-    @staticmethod
-    async def create_token_account(
-        request: models.IssuanceRequest, completed_steps: list[str]
-    ) -> types.CreateTokenResult:
-        """Create token accounts and map the recipient public keys to the tokens.
-
-        Tip: Doing this in first allows us to check in advance for any issue, like if
-        recipient has insufficient funds to pay for the issuance/mint.
-
-        Args:
-            request (models.IssuanceRequest): The issuance request.
-
-        Returns:
-            types.CreateTokenResult: The result of the token creation.
-        """
-        cfg = {
-            "public_key": request.issuer_meta.issuer_pubkey,
-            "private_key": request.issuer_meta.issuer_pvtket,
-        }
-        txn_intf = TokenFlow(cfg=cfg)
-
-        token_accounts: dict[str, dict[str, rpc_types.RPCResponse | str | None]] = {}
-
-        # On any error with creating an account, we store the recipient wallet addresses
-        # where the failure occurred. This may be used to send a refund to the
-        # issuer/recipients or prompt the issuer to perform the issuance again.
-        insuf_funds_reached: dict[str, str | None] = {}
-
-        for recipient in request.recipient_meta:
-            nft_id = str(time.time())
-
-            # NOTE: For some reason, the solana library returns the runtime error
-            # detail as a string repr of a dict. Here is an example error msg:
-            # Failed attempt 0: {
-            #   "code":-32002,
-            #   "message":"Transaction simulation failed: Attempt... (truncated)",
-            #   "data":{
-            #     "accounts":"None",
-            #     "err":"AccountNotFound",
-            #     "logs":[
-            #     ],
-            #     "unitsConsumed":0
-            #   }
-            # }
-            try:
-                completed_steps.append("1.1. Creating token account.")
-
-                token_account = await txn_intf.deploy(
-                    api_endpoint=SOLANA_API_ENDPOINT,
-                    name=xxhash.xxh32(nft_id).hexdigest(),
-                    symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
-                )
-
-                completed_steps.append("1.2. Created!")
-
-                token_accounts[recipient.recipient_pubkey] = token_account
-            except RuntimeError as err:
-                err_dict = re.search(r"\{.*\}", str(err))
-
-                if err_dict is not None:
-                    ast.literal_eval(err_dict.group(0))
-                    insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
-                        err_dict.group(0)
-                    ).get("message")
-                else:
-                    insuf_funds_reached[recipient.recipient_pubkey] = str(err)
-
-                token_account = {}
-
-        return (token_accounts, insuf_funds_reached, txn_intf, completed_steps)
+    def __init__(self, solana_api_endpoint: str) -> None:
+        self.solana_api_endpoint = solana_api_endpoint
 
     @staticmethod
     async def create_img_upload_request(
@@ -773,56 +710,6 @@ class IssuanceUtil:
         return (recipient_ecerts, nft_metas_coll)
 
     @staticmethod
-    async def mint_nft(
-        request: models.IssuanceRequest,
-        recipient_ecerts: types.PubkeyMap,
-        uploaded_nft_meta: typing.Any,
-        token_accounts: types.PubkeyMap,
-        txn_intf: TokenFlow,
-        failure_reached: dict[str, str | None],
-    ) -> types.MintResult:
-        for recipient in request.recipient_meta:
-            nft_meta_url = ""
-            nft_meta = recipient_ecerts[recipient.recipient_pubkey]["nft_meta"]
-
-            # Iterate through the uploaded NFT metadata to find the one that matches
-            # the current recipient's assigned NFT metadata.
-            for resp in uploaded_nft_meta["response_meta"]:
-                if resp["Key"] == nft_meta:
-                    nft_meta_url = IssuanceUtil.filebase_link.format(
-                        cid=resp["HTTPHeaders"]["x-amz-meta-cid"]
-                    )
-                    break
-
-            token_account = token_accounts.get(recipient.recipient_pubkey)
-
-            if token_account is not None:
-                contract_key = token_account["contract"]
-            else:
-                contract_key = None
-
-            if isinstance(contract_key, str):
-                try:
-                    mint_result = await txn_intf.mint(
-                        api_endpoint=SOLANA_API_ENDPOINT,
-                        contract_key=contract_key,
-                        destination_key=recipient.recipient_pubkey,
-                        link=nft_meta_url,
-                    )
-                except RuntimeError as exc:
-                    # * We have to record the failure and email the details to the
-                    # * issuer.
-                    failure_reached[recipient.recipient_pubkey] = str(exc)
-                    continue
-
-                if (rpc_resp := mint_result["response"]) is not None:
-                    recipient_ecerts[recipient.recipient_pubkey][
-                        "transaction_sig"
-                    ] = dict(rpc_resp)["result"]
-
-        return recipient_ecerts, failure_reached
-
-    @staticmethod
     async def construct_email_body(
         request: models.IssuanceRequest,
         recipient_template: str,
@@ -934,14 +821,133 @@ class IssuanceUtil:
 
         await logger.add_log_entry(
             str(reference_id),
-            str(datetime.datetime.utcnow()),
             message,
             "\n".join(completed_steps),
             level,
         )
 
-    @staticmethod
+    async def create_token_account(
+        self, request: models.IssuanceRequest, completed_steps: list[str]
+    ) -> types.CreateTokenResult:
+        """Create token accounts and map the recipient public keys to the tokens.
+
+        Tip: Doing this in first allows us to check in advance for any issue, like if
+        recipient has insufficient funds to pay for the issuance/mint.
+
+        Args:
+            request (models.IssuanceRequest): The issuance request.
+
+        Returns:
+            types.CreateTokenResult: The result of the token creation.
+        """
+        cfg = {
+            "public_key": request.issuer_meta.issuer_pubkey,
+            "private_key": request.issuer_meta.issuer_pvtket,
+        }
+        txn_intf = TokenFlow(cfg=cfg)
+
+        token_accounts: dict[str, dict[str, rpc_types.RPCResponse | str | None]] = {}
+
+        # On any error with creating an account, we store the recipient wallet addresses
+        # where the failure occurred. This may be used to send a refund to the
+        # issuer/recipients or prompt the issuer to perform the issuance again.
+        insuf_funds_reached: dict[str, str | None] = {}
+
+        for recipient in request.recipient_meta:
+            nft_id = str(time.time())
+
+            # NOTE: For some reason, the solana library returns the runtime error
+            # detail as a string repr of a dict. Here is an example error msg:
+            # Failed attempt 0: {
+            #   "code":-32002,
+            #   "message":"Transaction simulation failed: Attempt... (truncated)",
+            #   "data":{
+            #     "accounts":"None",
+            #     "err":"AccountNotFound",
+            #     "logs":[
+            #     ],
+            #     "unitsConsumed":0
+            #   }
+            # }
+            try:
+                completed_steps.append("1.1. Creating token account.")
+
+                token_account = await txn_intf.deploy(
+                    api_endpoint=self.solana_api_endpoint,
+                    name=xxhash.xxh32(nft_id).hexdigest(),
+                    symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
+                )
+
+                completed_steps.append("1.2. Created!")
+
+                token_accounts[recipient.recipient_pubkey] = token_account
+            except RuntimeError as err:
+                err_dict = re.search(r"\{.*\}", str(err))
+
+                if err_dict is not None:
+                    ast.literal_eval(err_dict.group(0))
+                    insuf_funds_reached[recipient.recipient_pubkey] = ast.literal_eval(
+                        err_dict.group(0)
+                    ).get("message")
+                else:
+                    insuf_funds_reached[recipient.recipient_pubkey] = str(err)
+
+                token_account = {}
+
+        return (token_accounts, insuf_funds_reached, txn_intf, completed_steps)
+
+    async def mint_nft(
+        self,
+        request: models.IssuanceRequest,
+        recipient_ecerts: types.PubkeyMap,
+        uploaded_nft_meta: typing.Any,
+        token_accounts: types.PubkeyMap,
+        txn_intf: TokenFlow,
+        failure_reached: dict[str, str | None],
+    ) -> types.MintResult:
+        for recipient in request.recipient_meta:
+            nft_meta_url = ""
+            nft_meta = recipient_ecerts[recipient.recipient_pubkey]["nft_meta"]
+
+            # Iterate through the uploaded NFT metadata to find the one that matches
+            # the current recipient's assigned NFT metadata.
+            for resp in uploaded_nft_meta["response_meta"]:
+                if resp["Key"] == nft_meta:
+                    nft_meta_url = IssuanceUtil.filebase_link.format(
+                        cid=resp["HTTPHeaders"]["x-amz-meta-cid"]
+                    )
+                    break
+
+            token_account = token_accounts.get(recipient.recipient_pubkey)
+
+            if token_account is not None:
+                contract_key = token_account["contract"]
+            else:
+                contract_key = None
+
+            if isinstance(contract_key, str):
+                try:
+                    mint_result = await txn_intf.mint(
+                        api_endpoint=self.solana_api_endpoint,
+                        contract_key=contract_key,
+                        destination_key=recipient.recipient_pubkey,
+                        link=nft_meta_url,
+                    )
+                except RuntimeError as exc:
+                    # * We have to record the failure and email the details to the
+                    # * issuer.
+                    failure_reached[recipient.recipient_pubkey] = str(exc)
+                    continue
+
+                if (rpc_resp := mint_result["response"]) is not None:
+                    recipient_ecerts[recipient.recipient_pubkey][
+                        "transaction_sig"
+                    ] = dict(rpc_resp)["result"]
+
+        return recipient_ecerts, failure_reached
+
     async def issue_certificate(
+        self,
         request: models.IssuanceRequest,
         storage_svcs: StorageService,
         emailer: Emailer,
@@ -965,7 +971,7 @@ class IssuanceUtil:
             failure_reached,
             txn_intf,
             completed_steps,
-        ) = await IssuanceUtil.create_token_account(request, completed_steps)
+        ) = await self.create_token_account(request, completed_steps)
 
         if token_accounts != {}:
             completed_steps.append("2. Uploading e-Certificates.")
@@ -995,7 +1001,7 @@ class IssuanceUtil:
 
             completed_steps.append("5. Minting NFT.")
 
-            recipient_ecerts, failure_reached = await IssuanceUtil.mint_nft(
+            recipient_ecerts, failure_reached = await self.mint_nft(
                 request,
                 recipient_ecerts,
                 uploaded_nft_meta,

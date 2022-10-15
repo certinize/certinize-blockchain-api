@@ -26,6 +26,10 @@ class AppSettings(pydantic.BaseSettings):
     gmail_password: str = "password"
     gmail_smtp_server: str = "smtp.gmail.com"
     cerog: pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(url="http://", scheme="http")
+    timezone: str = "Asia/Manila"
+    solana_api_endpoint: pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(
+        url="http://", scheme="http"
+    )
 
     class Config(pydantic.BaseSettings.Config):
         env_file = ".env"

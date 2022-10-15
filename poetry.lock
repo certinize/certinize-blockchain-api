@@ -762,6 +762,14 @@ python-versions = ">=3.7"
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "pytz"
+version = "2022.4"
+description = "World timezone definitions, modern and historical"
+category = "main"
+optional = false
+python-versions = "*"
+
+[[package]]
 name = "pyyaml"
 version = "5.4.1"
 description = "YAML parser and emitter for Python"
@@ -978,7 +986,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "b1e054706b63ff3b68b84ad35b4f3427c16f89297e655bc19ce44c80a8dad6a2"
+content-hash = "17c4edf3f8cfe2dddbeaff6dba17b60316584a6cc7f13a210cdd2176d1412645"
 
 [metadata.files]
 aiohttp = []
@@ -1046,6 +1054,7 @@ pyrsistent = []
 pytest = []
 python-dateutil = []
 python-dotenv = []
+pytz = []
 pyyaml = []
 requests = []
 rfc3986 = []

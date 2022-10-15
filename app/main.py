@@ -1,6 +1,6 @@
 # pylint: disable=E1101
 """
-app.server
+app.main
 ~~~~~~~~~~
 
 This module contains the server startup logic.
@@ -27,11 +27,10 @@ app.exceptions_handlers[errors.BadRequest] = errors.error_400_handler  # type: i
 app.on_start += events.create_storage_svcs_client
 app.on_start += events.create_gmail_client
 app.on_start += events.create_logger_svcs_client
+app.on_start += events.create_issuance_util
 app.on_stop += events.dispose_storage_svcs_client
 app.on_stop += events.dispose_gmail_client
 app.on_stop += events.dispose_logger_svcs_client
-
-app.services.add_exact_singleton(services.IssuanceUtil)  # type: ignore
 
 
 @app.router.get("/")

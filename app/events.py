@@ -33,6 +33,7 @@ async def dispose_gmail_client(app: blacksheep.Application):
 async def create_logger_svcs_client(app: blacksheep.Application):
     logger = services.LoggerService(
         endpoint_url=settings.app_settings.cerog,
+        timezone=settings.app_settings.timezone,
     )
     app.services.add_instance(logger)  # type: ignore
 
@@ -40,3 +41,7 @@ async def create_logger_svcs_client(app: blacksheep.Application):
 async def dispose_logger_svcs_client(app: blacksheep.Application):
     logger: services.LoggerService = app.service_provider[services.LoggerService]
     await logger.client.close()
+
+async def create_issuance_util(app: blacksheep.Application):
+    issuance_util = services.IssuanceUtil(solana_api_endpoint=settings.app_settings.solana_api_endpoint)
+    app.services.add_instance(issuance_util)  # type: ignore
