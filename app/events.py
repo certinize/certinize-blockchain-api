@@ -42,6 +42,15 @@ async def dispose_logger_svcs_client(app: blacksheep.Application):
     logger: services.LoggerService = app.service_provider[services.LoggerService]
     await logger.client.close()
 
+
 async def create_issuance_util(app: blacksheep.Application):
-    issuance_util = services.IssuanceUtil(solana_api_endpoint=settings.app_settings.solana_api_endpoint)
+    issuance_util = services.IssuanceUtil(
+        solana_api_endpoint=settings.app_settings.solana_api_endpoint
+    )
     app.services.add_instance(issuance_util)  # type: ignore
+
+
+async def create_redis_client(app: blacksheep.Application):
+    redis = services.Redis(settings.app_settings.redis_url)
+    await redis.connect()
+    app.services.add_instance(redis)  # type: ignore

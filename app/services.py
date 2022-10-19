@@ -17,11 +17,14 @@ import uuid
 from email.mime import multipart, text
 
 import aiohttp
+import aioredis
+import base58
 import orjson
 import pydantic
 import pytz
 import solders.keypair as solders_keypair  # type: ignore # pylint: disable=E0401
 import xxhash
+from nacl import exceptions, signing
 from solana import keypair, publickey, system_program, transaction
 from solana.rpc import api
 from solana.rpc import types as rpc_types
@@ -841,7 +844,7 @@ class IssuanceUtil:
         """
         cfg = {
             "public_key": request.issuer_meta.issuer_pubkey,
-            "private_key": request.issuer_meta.issuer_pvtket,
+            "private_key": request.signature,
         }
         txn_intf = TokenFlow(cfg=cfg)
 
@@ -1037,3 +1040,110 @@ class IssuanceUtil:
             str(reference_id),
             completed_steps,
         )
+
+
+class TransactionUtil:
+    """Utility class for transaction related operations."""
+
+    @staticmethod
+    async def generate_message(id: str | None = None) -> str:
+        """Create a message to be signed by the user from the client."""
+
+        message = (
+            "Please sign this message to prove your ownership of the Solana wallet "
+            f"address. Message unique identifier: {id or uuid.uuid1()}"
+        )
+
+        return message
+
+    @staticmethod
+    async def verify_signature(
+        public_key: str,
+        message: str,
+        signature: str,
+    ) -> bytes:
+        """Verify that the signed message is valid.
+
+        Args:
+            public_key (str): Solana public key.
+            message (str): The message that was signed.
+            signature (str): Signature from the signed message.
+
+        Returns:
+            bytes: The decoded signature.
+
+        Raises:
+            ValueError: If the signature is invalid.
+        """
+        pubkey = bytes(publickey.PublicKey(public_key))
+        msg = bytes(message, "utf-8")
+        sig = bytes(signature, "utf-8")
+
+        try:
+            return signing.VerifyKey(pubkey).verify(msg, base58.b58decode(sig))
+        except exceptions.BadSignatureError as bad_sig:
+            raise ValueError(f"Invalid signature: {str(bad_sig)}") from bad_sig
+
+
+class Redis:
+
+    redis_url: str
+    connection: aioredis.Redis
+
+    def __init__(self, redis_url: str) -> None:
+        self.redis_url = redis_url
+
+    async def connect(self):
+        """Connect to the Redis server."""
+        self.connection = await aioredis.from_url(self.redis_url, decode_responses=True)  # type: ignore
+
+    async def get(self, key: str) -> str:
+        """Get a value from the Redis server.
+
+        Args:
+            key (str): Key to retrieve.
+
+        Returns:
+            str: Value retrieved.
+        """
+        return await self.connection.get(key)  # type: ignore
+
+    async def set(self, key: str, value: str | bytes) -> None:
+        """Set a value in the Redis server.
+
+        Args:
+            key (str): Key to set.
+            value (str): Value to set.
+        """
+        await self.connection.set(key, value)  # type: ignore
+
+    async def delete(self, key: str) -> None:
+        """Delete a key from the Redis server.
+
+        Args:
+            key (str): Key to delete.
+        """
+        await self.connection.delete(key)  # type: ignore
+
+    async def hset(self, key: str, value: dict[str, str | bytes]) -> typing.Any:
+        """Set a value in the Redis server.
+
+        Args:
+            key (str): Key to set.
+            field (str): Field to set.
+            value (str): Value to set.
+        """
+        return await self.connection.hset(  # type:ignore
+            key, mapping=value
+        )
+
+    async def hgetall(self, key: str) -> dict[str, str | bytes]:
+        """Get a value from the Redis server.
+
+        Args:
+            key (str): Key to retrieve.
+
+        Returns:
+            str: Value retrieved.
+        """
+        return await self.connection.hgetall(key)  # type: ignore

@@ -19,6 +19,21 @@ yarl = ">=1.0,<2.0"
 speedups = ["aiodns", "brotli", "cchardet"]
 
 [[package]]
+name = "aioredis"
+version = "2.0.1"
+description = "asyncio (PEP 3156) Redis support"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+async-timeout = "*"
+typing-extensions = "*"
+
+[package.extras]
+hiredis = ["hiredis (>=1.0)"]
+
+[[package]]
 name = "aiosignal"
 version = "1.2.0"
 description = "aiosignal: a list of registered asynchronous callbacks"
@@ -986,10 +1001,11 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "17c4edf3f8cfe2dddbeaff6dba17b60316584a6cc7f13a210cdd2176d1412645"
+content-hash = "49ab0c527f84c185d8c4fc600ebcb8deb66f3cd4dfa13e4537fe97cd05b2e36c"
 
 [metadata.files]
 aiohttp = []
+aioredis = []
 aiosignal = []
 anyio = []
 apischema = []

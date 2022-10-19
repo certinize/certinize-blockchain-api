@@ -30,6 +30,9 @@ class AppSettings(pydantic.BaseSettings):
     solana_api_endpoint: pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(
         url="http://", scheme="http"
     )
+    redis_url: pydantic.RedisDsn = pydantic.RedisDsn(
+        "redis://localhost:6379/0", scheme="redis"
+    )
 
     class Config(pydantic.BaseSettings.Config):
         env_file = ".env"
