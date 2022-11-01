@@ -61,11 +61,10 @@ async def issue_certificate(
 
     if issuer_request_info is not None:
         try:
-            result = await transaction_util.verify_signature(
+            _ = await transaction_util.verify_signature(
                 pubkey, message, data.value.signature
             )
         except ValueError as invalid_sig:
-            result = b""
             # Perhaps data.value.signature is a private key?
             is_keypair = crypto.verify_keypair(pubkey, data.value.signature)
 
@@ -74,13 +73,11 @@ async def issue_certificate(
                     details=str(invalid_sig), status=422
                 ) from invalid_sig
 
-        print(result)
-
-        # asyncio.create_task(
-        #     issuance_util.issue_certificate(
-        #         data.value, storage_svcs, emailer, data.value.request_id, logger
-        #     )
-        # )
+        asyncio.create_task(
+            issuance_util.issue_certificate(
+                data.value, storage_svcs, emailer, data.value.request_id, logger
+            )
+        )
 
         return blacksheep.Response(
             status=202,
