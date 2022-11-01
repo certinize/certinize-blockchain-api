@@ -44,11 +44,6 @@ class IssuanceRequest(pydantic.BaseModel):
     request_id: pydantic.UUID1
     signature: str
 
-    @pydantic.validator("signature")
-    @classmethod
-    def signature_on_curve(cls, value: str):
-        return crypto.pvtkey_on_curve(value)
-
 
 class NonFungibleTokenMetadata(pydantic.BaseModel):
     """Pydantic model for validating NFT meta according to Metaplex's standard."""
