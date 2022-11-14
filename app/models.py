@@ -5,6 +5,7 @@ app.models
 This module contains pydantic validation schemas for the API.
 """
 import re
+import typing
 
 import pydantic
 
@@ -29,7 +30,6 @@ class IssuerMeta(pydantic.BaseModel):
     issuer_name: str
     issuer_email: pydantic.EmailStr
     issuer_pubkey: str
-    issuer_address: str | None = None
     issuer_website: pydantic.HttpUrl | None = None
 
     @pydantic.validator("issuer_pubkey")
@@ -43,6 +43,22 @@ class IssuanceRequest(pydantic.BaseModel):
     recipient_meta: list[RecipientMeta]
     request_id: pydantic.UUID1
     signature: str
+
+
+class Keypair(pydantic.BaseModel):
+    pubkey: str
+    pvtkey: str
+
+    @pydantic.validator("pubkey", "pvtkey")
+    @classmethod
+    def pvtkey_matches_pubkey(cls, keys: dict[str, typing.Any]):
+        pubkey = keys["pubkey"]
+        pvtkey = keys["pvtkey"]
+
+        if not crypto.verify_keypair(pubkey, pvtkey):
+            raise ValueError("Private key does not match public key")
+
+        return keys
 
 
 class NonFungibleTokenMetadata(pydantic.BaseModel):

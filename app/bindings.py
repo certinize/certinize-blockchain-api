@@ -14,7 +14,7 @@ from blacksheep.server import bindings
 from app import errors, models
 
 
-class FromIssuanceRequestModel(
+class FromMain(
     bindings.BoundValue[bindings.T]
 ):  # pylint: disable=R0903
     ...
@@ -22,10 +22,21 @@ class FromIssuanceRequestModel(
 
 class IssuanceRequestBinder(bindings.Binder):
 
-    handle = FromIssuanceRequestModel
+    handle = FromMain
 
     async def get_value(self, request: blacksheep.Request) -> typing.Any:
         try:
             return models.IssuanceRequest(**await request.json())
+        except pydantic.ValidationError as validation_error:
+            raise errors.BadRequest(details=validation_error.errors())
+
+
+class KeypairBinder(bindings.Binder):
+
+    handle = FromMain
+
+    async def get_value(self, request: blacksheep.Request) -> typing.Any:
+        try:
+            return models.Keypair(**await request.json())
         except pydantic.ValidationError as validation_error:
             raise errors.BadRequest(details=validation_error.errors())

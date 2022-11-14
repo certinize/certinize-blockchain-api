@@ -33,7 +33,7 @@ from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 
 from app import models, types
 from app.templates import emails
-from app.utils import metadata, requests
+from app.utils import crypto, metadata, requests
 
 STORAGES = "/storages"
 ISSUANCES = "/issuances"
@@ -1042,49 +1042,6 @@ class IssuanceUtil:
         )
 
 
-class TransactionUtil:
-    """Utility class for transaction related operations."""
-
-    @staticmethod
-    async def generate_message(id: str | None = None) -> str:
-        """Create a message to be signed by the user from the client."""
-
-        message = (
-            "Please sign this message to prove your ownership of the Solana wallet "
-            f"address. Message unique identifier: {id or uuid.uuid1()}"
-        )
-
-        return message
-
-    @staticmethod
-    async def verify_signature(
-        public_key: str,
-        message: str,
-        signature: str,
-    ) -> bytes:
-        """Verify that the signed message is valid.
-
-        Args:
-            public_key (str): Solana public key.
-            message (str): The message that was signed.
-            signature (str): Signature from the signed message.
-
-        Returns:
-            bytes: The decoded signature.
-
-        Raises:
-            ValueError: If the signature is invalid.
-        """
-        pubkey = bytes(publickey.PublicKey(public_key))
-        msg = bytes(message, "utf-8")
-        sig = bytes(signature, "utf-8")
-
-        try:
-            return signing.VerifyKey(pubkey).verify(msg, base58.b58decode(sig))
-        except exceptions.BadSignatureError as bad_sig:
-            raise ValueError(f"Invalid signature: {str(bad_sig)}") from bad_sig
-
-
 class Redis:
 
     redis_url: str
@@ -1095,7 +1052,9 @@ class Redis:
 
     async def connect(self):
         """Connect to the Redis server."""
-        self.connection = await aioredis.from_url(self.redis_url, decode_responses=True)  # type: ignore
+        self.connection = await aioredis.from_url(  # type: ignore
+            self.redis_url, decode_responses=True
+        )
 
     async def get(self, key: str) -> str:
         """Get a value from the Redis server.
@@ -1147,3 +1106,55 @@ class Redis:
             str: Value retrieved.
         """
         return await self.connection.hgetall(key)  # type: ignore
+
+
+class TransactionUtil:
+    """Utility class for transaction related operations."""
+
+    @staticmethod
+    async def generate_message(redis: Redis, keypair: models.Keypair):
+        """Create a message to be signed by the user from the client."""
+        request_id = str(uuid.uuid1())
+        message = (
+            "Please sign this message to prove your ownership of the Solana wallet "
+            f"address. Your request ID: {request_id}"
+        )
+
+        await redis.hset(
+            request_id,
+            {
+                "message": f"{message}",
+                "pubkey": keypair.pubkey,
+                "pvtkey": keypair.pvtkey,
+            },
+        )
+
+        return message, request_id
+
+    @staticmethod
+    async def verify_signature(
+        public_key: str,
+        message: str,
+        signature: str,
+    ) -> bytes:
+        """Verify that the signed message is valid.
+
+        Args:
+            public_key (str): Solana public key.
+            message (str): The message that was signed.
+            signature (str): Signature from the signed message.
+
+        Returns:
+            bytes: The decoded signature.
+
+        Raises:
+            ValueError: If the signature is invalid.
+        """
+        pubkey = bytes(publickey.PublicKey(public_key))
+        msg = bytes(message, "utf-8")
+        sig = bytes(signature, "utf-8")
+
+        try:
+            return signing.VerifyKey(pubkey).verify(msg, base58.b58decode(sig))
+        except exceptions.BadSignatureError as bad_sig:
+            raise ValueError(f"Invalid signature: {str(bad_sig)}") from bad_sig

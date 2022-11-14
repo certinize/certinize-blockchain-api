@@ -14,7 +14,6 @@ import orjson
 import uvloop
 
 from app import bindings, errors, events, models, services
-from app.utils import crypto
 
 if platform.system() == "Linux":
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -44,7 +43,7 @@ async def index() -> dict[str, str]:
 
 @app.router.post("/issuances")
 async def issue_certificate(
-    data: bindings.FromIssuanceRequestModel[models.IssuanceRequest],
+    data: bindings.FromMain[models.IssuanceRequest],
     storage_svcs: services.StorageService,
     issuance_util: services.IssuanceUtil,
     emailer: services.Emailer,
@@ -53,10 +52,17 @@ async def issue_certificate(
     redis: services.Redis,
 ) -> blacksheep.Response:
     issuer_request_info = await redis.hgetall(str(data.value.request_id))
-    pubkey = issuer_request_info["pubkey"]
-    message = issuer_request_info["message"]
+    pubkey = issuer_request_info.get("pubkey")
+    pvtkey = issuer_request_info.get("pvtkey")
+    message = issuer_request_info.get("message")
+
+    if pubkey is None:
+        raise errors.BadRequest(
+            "Invalid request ID", details="Request ID not found", status=404
+        )
 
     assert isinstance(pubkey, str)
+    assert isinstance(pvtkey, str)
     assert isinstance(message, str)
 
     if issuer_request_info is not None:
@@ -65,13 +71,14 @@ async def issue_certificate(
                 pubkey, message, data.value.signature
             )
         except ValueError as invalid_sig:
-            # Perhaps data.value.signature is a private key?
-            is_keypair = crypto.verify_keypair(pubkey, data.value.signature)
+            raise errors.BadRequest(
+                details=str(invalid_sig), status=422
+            ) from invalid_sig
 
-            if not is_keypair:
-                raise errors.BadRequest(
-                    details=str(invalid_sig), status=422
-                ) from invalid_sig
+        # We have to overwrite the signature as
+        # services.IssuanceUtil.issue_certificate() uses it for the keypair that will
+        # sign the transaction
+        data.value.signature = pvtkey
 
         asyncio.create_task(
             issuance_util.issue_certificate(
@@ -108,13 +115,11 @@ async def issue_certificate(
 
 @app.router.get("/issuances/{pubkey}")
 async def get_unsigned_message(
-    transaction_util: services.TransactionUtil, redis: services.Redis, pubkey: str
+    data: bindings.FromMain[models.Keypair],
+    transaction_util: services.TransactionUtil,
+    redis: services.Redis,
 ) -> blacksheep.Response:
-    pubkey = crypto.pubkey_on_curve(pubkey)
-    request_id = str(uuid.uuid1())
-    message = await transaction_util.generate_message(request_id)
-
-    await redis.hset(request_id, {"message": f"{message}", "pubkey": pubkey})
+    message, request_id = await transaction_util.generate_message(redis, data.value)
 
     return blacksheep.Response(
         status=200,
