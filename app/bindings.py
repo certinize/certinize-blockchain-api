@@ -14,7 +14,12 @@ from blacksheep.server import bindings
 from app import errors, models
 
 
-class FromMain(
+class FromIssuanceRequest(
+    bindings.BoundValue[bindings.T]
+):  # pylint: disable=R0903
+    ...
+
+class FromKeypairBindedr(
     bindings.BoundValue[bindings.T]
 ):  # pylint: disable=R0903
     ...
@@ -22,7 +27,7 @@ class FromMain(
 
 class IssuanceRequestBinder(bindings.Binder):
 
-    handle = FromMain
+    handle = FromIssuanceRequest
 
     async def get_value(self, request: blacksheep.Request) -> typing.Any:
         try:
@@ -33,7 +38,7 @@ class IssuanceRequestBinder(bindings.Binder):
 
 class KeypairBinder(bindings.Binder):
 
-    handle = FromMain
+    handle = FromKeypairBindedr
 
     async def get_value(self, request: blacksheep.Request) -> typing.Any:
         try:

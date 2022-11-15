@@ -7,7 +7,6 @@ This module contains the server startup logic.
 """
 import asyncio
 import platform
-import uuid
 
 import blacksheep
 import orjson
@@ -43,7 +42,7 @@ async def index() -> dict[str, str]:
 
 @app.router.post("/issuances")
 async def issue_certificate(
-    data: bindings.FromMain[models.IssuanceRequest],
+    data: bindings.FromIssuanceRequest[models.IssuanceRequest],
     storage_svcs: services.StorageService,
     issuance_util: services.IssuanceUtil,
     emailer: services.Emailer,
@@ -113,9 +112,9 @@ async def issue_certificate(
     )
 
 
-@app.router.get("/issuances/{pubkey}")
+@app.router.get("/issuances")
 async def get_unsigned_message(
-    data: bindings.FromMain[models.Keypair],
+    data: bindings.FromKeypairBindedr[models.Keypair],
     transaction_util: services.TransactionUtil,
     redis: services.Redis,
 ) -> blacksheep.Response:

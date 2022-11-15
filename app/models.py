@@ -46,19 +46,16 @@ class IssuanceRequest(pydantic.BaseModel):
 
 
 class Keypair(pydantic.BaseModel):
-    pubkey: str
-    pvtkey: str
+    pubkey: str = pydantic.Field(title="pubkey")
+    pvtkey: str = pydantic.Field(title="pvtkey")
 
-    @pydantic.validator("pubkey", "pvtkey")
+    @pydantic.root_validator()
     @classmethod
-    def pvtkey_matches_pubkey(cls, keys: dict[str, typing.Any]):
-        pubkey = keys["pubkey"]
-        pvtkey = keys["pvtkey"]
-
-        if not crypto.verify_keypair(pubkey, pvtkey):
+    def pvtkey_matches_pubkey(cls, values: dict[str, str]) -> dict[str, str]:
+        if not crypto.verify_keypair(values["pubkey"], values["pvtkey"]):
             raise ValueError("Private key does not match public key")
 
-        return keys
+        return values
 
 
 class NonFungibleTokenMetadata(pydantic.BaseModel):
