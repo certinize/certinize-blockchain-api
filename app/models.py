@@ -5,7 +5,6 @@ app.models
 This module contains pydantic validation schemas for the API.
 """
 import re
-import typing
 
 import pydantic
 

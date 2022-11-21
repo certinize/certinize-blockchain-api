@@ -33,7 +33,7 @@ from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 
 from app import models, types
 from app.templates import emails
-from app.utils import crypto, metadata, requests
+from app.utils import metadata, requests
 
 STORAGES = "/storages"
 ISSUANCES = "/issuances"
