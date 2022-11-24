@@ -1114,7 +1114,7 @@ class TransactionUtil:
     @staticmethod
     async def generate_message(redis: Redis, keypair: models.Keypair):
         """Create a message to be signed by the user from the client."""
-        request_id = str(uuid.uuid4())
+        request_id = str(uuid.uuid1())
         message = (
             "Please sign this message to prove your ownership of the Solana wallet "
             f"address. Your request ID: {request_id}"
