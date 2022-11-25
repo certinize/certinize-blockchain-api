@@ -33,6 +33,9 @@ class AppSettings(pydantic.BaseSettings):
     redis_url: pydantic.RedisDsn = pydantic.RedisDsn(
         "redis://localhost:6379/0", scheme="redis"
     )
+    certinize_app_url: pydantic.AnyHttpUrl = pydantic.AnyHttpUrl(
+        url="http://", scheme="http"
+    )
 
     class Config(pydantic.BaseSettings.Config):
         env_file = ".env"

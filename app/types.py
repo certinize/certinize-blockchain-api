@@ -12,4 +12,5 @@ CreateTokenResult = tuple[
     dict[str, str | None],
     typing.Any,
     list[str],
+    dict[str, str],
 ]

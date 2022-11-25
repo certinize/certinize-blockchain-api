@@ -11,7 +11,6 @@ import base64
 import datetime
 import re
 import smtplib
-import time
 import typing
 import uuid
 from email.mime import multipart, text
@@ -31,7 +30,7 @@ from solana.rpc import types as rpc_types
 from spl.token import instructions
 from spl.token._layouts import ACCOUNT_LAYOUT, MINT_LAYOUT
 
-from app import models, types
+from app import models, settings, types
 from app.templates import emails
 from app.utils import metadata, requests
 
@@ -603,6 +602,7 @@ class IssuanceUtil:
         files: list[dict[str, str]],
         filenames: dict[str, str],
         cid: object,
+        nft_names: dict[str, str],
     ) -> types.NftMetadataTup:
         # * Store the filenames with the wallet addresses as keys so that we don't have
         # * to map them later. The content of this dict will be used to mint
@@ -659,47 +659,36 @@ class IssuanceUtil:
             if ecert_url == "":
                 continue
 
-            # The certificate ID is composed of two xxh3_64 hashed values. The former
-            # part of the certificate ID identifies the data storage that can help
-            # verify the legitimacy of the e-Certificate. The latter part is a unique
-            # identifier assigned to the e-Certificate.
-            # certificate_id = (
-            #     f"""{xxhash.xxh3_64(yr_mth).hexdigest()}-"""
-            #     f"""{xxhash.xxh3_64(f"{uuid.uuid1()}").hexdigest()}"""
-            # )
-
-            # The symbol can be anything, but it must be unique. To create a symbol, we
-            # combibe the recipient's initials and the xxhash of the current date and
-            # time.
-            sym_ = (
-                f"-{xxhash.xxh3_64(str(datetime.datetime.today())).hexdigest().upper()}"
-            )
-            symbol = (
-                "".join(
-                    [name[0].upper() for name in recipient.recipient_name.split(" ")]
-                )
-                + sym_
-            )
-
             # We have to generate the nft_meta inside a pydantic model to ensure the
             # key-value pairs conform with Metaplex's standard. NOTE: external_url
             # should be a link that leads to the JSON file containing public information
             # about the issuer.
             nft_meta = dict(
                 models.NonFungibleTokenMetadata(
-                    name=f"{recipient.recipient_name}'s e-Certificate",
-                    symbol=symbol,
+                    name=nft_names[recipient.recipient_pubkey],
+                    symbol="CERT",
                     description=(
                         f"Awarded to {recipient.recipient_name} "
                         f"by {request.issuer_meta.issuer_name}"
                     ),
                     image=pydantic.HttpUrl(url=ecert_url, scheme="https"),
-                    external_url=request.issuer_meta.issuer_website,
+                    external_url=pydantic.HttpUrl(
+                        url=f"{settings.app_settings.certinize_app_url}/verification/{nft_names[recipient.recipient_pubkey]}",
+                        scheme="https",
+                    ),
                     attributes=[
                         {
-                            "trait_type": "verification",
-                            "value": "https://verification.com",
-                        }
+                            "trait_type": "issuer",
+                            "value": request.issuer_meta.issuer_website,
+                        },
+                        {
+                            "trait_type": "recipient",
+                            "value": recipient.recipient_name,
+                        },
+                        {
+                            "trait_type": "date",
+                            "value": datetime.datetime.today().strftime("%Y-%m-%d"),
+                        },
                     ],
                 )
             )
@@ -855,9 +844,9 @@ class IssuanceUtil:
         # issuer/recipients or prompt the issuer to perform the issuance again.
         insuf_funds_reached: dict[str, str | None] = {}
 
-        for recipient in request.recipient_meta:
-            nft_id = str(time.time())
+        nft_names: dict[str, str] = {}
 
+        for recipient in request.recipient_meta:
             # NOTE: For some reason, the solana library returns the runtime error
             # detail as a string repr of a dict. Here is an example error msg:
             # Failed attempt 0: {
@@ -871,13 +860,38 @@ class IssuanceUtil:
             #     "unitsConsumed":0
             #   }
             # }
+
+            # The certificate ID is composed of two xxh3_64 hashed values. The former
+            # part of the certificate ID identifies the data storage that can help
+            # verify the legitimacy of the e-Certificate. The latter part is a unique
+            # identifier assigned to the e-Certificate.
+            # certificate_id = (
+            #     f"""{xxhash.xxh3_64(yr_mth).hexdigest()}-"""
+            #     f"""{xxhash.xxh3_64(f"{uuid.uuid1()}").hexdigest()}"""
+            # )
+
+            # The symbol can be anything, but it must be unique. To create a symbol, we
+            # combibe the recipient's initials and the xxhash of the current date and
+            # time.
+            sym_ = (
+                f"-{xxhash.xxh3_64(str(datetime.datetime.today())).hexdigest().upper()}"
+            )
+            nft_name = (
+                "".join(
+                    [name[0].upper() for name in recipient.recipient_name.split(" ")]
+                )
+                + sym_
+            )
+
+            nft_names[recipient.recipient_pubkey] = nft_name
+
             try:
                 completed_steps.append("1.1. Creating token account.")
 
                 token_account = await txn_intf.deploy(
                     api_endpoint=self.solana_api_endpoint,
-                    name=xxhash.xxh32(nft_id).hexdigest(),
-                    symbol="-".join(list(xxhash.xxh3_64(nft_id).hexdigest()[:5])),
+                    name=nft_name,
+                    symbol="CERT",
                 )
 
                 completed_steps.append("1.2. Created!")
@@ -896,7 +910,13 @@ class IssuanceUtil:
 
                 token_account = {}
 
-        return (token_accounts, insuf_funds_reached, txn_intf, completed_steps)
+        return (
+            token_accounts,
+            insuf_funds_reached,
+            txn_intf,
+            completed_steps,
+            nft_names,
+        )
 
     async def mint_nft(
         self,
@@ -973,6 +993,7 @@ class IssuanceUtil:
             failure_reached,
             txn_intf,
             completed_steps,
+            nft_names,
         ) = await self.create_token_account(request, completed_steps)
 
         if token_accounts != {}:
@@ -988,7 +1009,7 @@ class IssuanceUtil:
 
             completed_steps.append("3. Creating nft metadata.")
             nft_metadata = await IssuanceUtil.create_nft_metadata(
-                request, token_accounts, files, filenames, cid
+                request, token_accounts, files, filenames, cid, nft_names
             )
         else:
             nft_metadata = None

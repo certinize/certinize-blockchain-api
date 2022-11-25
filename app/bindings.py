@@ -14,14 +14,11 @@ from blacksheep.server import bindings
 from app import errors, models
 
 
-class FromIssuanceRequest(
-    bindings.BoundValue[bindings.T]
-):  # pylint: disable=R0903
+class FromIssuanceRequest(bindings.BoundValue[bindings.T]):  # pylint: disable=R0903
     ...
 
-class FromKeypairBindedr(
-    bindings.BoundValue[bindings.T]
-):  # pylint: disable=R0903
+
+class FromKeypairBindedr(bindings.BoundValue[bindings.T]):  # pylint: disable=R0903
     ...
 
 

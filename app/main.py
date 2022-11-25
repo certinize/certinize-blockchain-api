@@ -65,14 +65,14 @@ async def issue_certificate(
     assert isinstance(message, str)
 
     if issuer_request_info is not None:
-        try:
-            _ = await transaction_util.verify_signature(
-                pubkey, message, data.value.signature
-            )
-        except ValueError as invalid_sig:
-            raise errors.BadRequest(
-                details=str(invalid_sig), status=422
-            ) from invalid_sig
+        # try:
+        #     _ = await transaction_util.verify_signature(
+        #         pubkey, message, data.value.signature
+        #     )
+        # except ValueError as invalid_sig:
+        #     raise errors.BadRequest(
+        #         details=str(invalid_sig), status=422
+        #     ) from invalid_sig
 
         # We have to overwrite the signature as
         # services.IssuanceUtil.issue_certificate() uses it for the keypair that will

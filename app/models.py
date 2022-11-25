@@ -29,7 +29,7 @@ class IssuerMeta(pydantic.BaseModel):
     issuer_name: str
     issuer_email: pydantic.EmailStr
     issuer_pubkey: str
-    issuer_website: pydantic.HttpUrl | None = None
+    issuer_website: pydantic.HttpUrl
 
     @pydantic.validator("issuer_pubkey")
     @classmethod
@@ -65,4 +65,4 @@ class NonFungibleTokenMetadata(pydantic.BaseModel):
     image: pydantic.HttpUrl
     symbol: str | None = None
     attributes: list[dict[str, str]] | None = None
-    external_url: pydantic.HttpUrl | None = None
+    external_url: pydantic.AnyHttpUrl
