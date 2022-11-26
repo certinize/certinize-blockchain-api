@@ -673,20 +673,28 @@ class IssuanceUtil:
                     ),
                     image=pydantic.HttpUrl(url=ecert_url, scheme="https"),
                     external_url=pydantic.HttpUrl(
-                        url=f"{settings.app_settings.certinize_app_url}/verification/{nft_names[recipient.recipient_pubkey]}",
+                        url=f"{settings.app_settings.certinize_app_url}/verification/{token_accounts[recipient.recipient_pubkey]['contract']}",
                         scheme="https",
                     ),
                     attributes=[
                         {
-                            "trait_type": "issuer",
+                            "trait_type": "issuer name",
+                            "value": request.issuer_meta.issuer_name,
+                        },
+                        {
+                            "trait_type": "issuer website",
                             "value": request.issuer_meta.issuer_website,
                         },
                         {
-                            "trait_type": "recipient",
+                            'trait_type': 'issuer email',
+                            'value': request.issuer_meta.issuer_email,
+                        },
+                        {
+                            "trait_type": "recipient name",
                             "value": recipient.recipient_name,
                         },
                         {
-                            "trait_type": "date",
+                            "trait_type": "issuance date",
                             "value": datetime.datetime.today().strftime("%Y-%m-%d"),
                         },
                     ],
