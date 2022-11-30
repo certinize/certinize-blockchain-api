@@ -42,6 +42,7 @@ class IssuanceRequest(pydantic.BaseModel):
     recipient_meta: list[RecipientMeta]
     request_id: pydantic.UUID1
     signature: str
+    event_title: str
 
 
 class Keypair(pydantic.BaseModel):

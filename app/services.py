@@ -686,8 +686,8 @@ class IssuanceUtil:
                             "value": request.issuer_meta.issuer_website,
                         },
                         {
-                            'trait_type': 'issuer email',
-                            'value': request.issuer_meta.issuer_email,
+                            "trait_type": "issuer email",
+                            "value": request.issuer_meta.issuer_email,
                         },
                         {
                             "trait_type": "recipient name",
@@ -696,6 +696,10 @@ class IssuanceUtil:
                         {
                             "trait_type": "issuance date",
                             "value": datetime.datetime.today().strftime("%Y-%m-%d"),
+                        },
+                        {
+                            "trait_type": "event title",
+                            "value": request.event_title,
                         },
                     ],
                 )
